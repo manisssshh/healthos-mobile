@@ -1,16 +1,20 @@
 import { ScrollView, Text, View } from "react-native";
 import { useEffect, useMemo, useState } from "react";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
+import { LinearGradient } from "expo-linear-gradient";
+import Animated, { FadeInDown } from "react-native-reanimated";
 import { ScoreCircle } from "../components/ScoreCircle";
 import { MetricCard } from "../components/MetricCard";
 import { InsightCard } from "../components/InsightCard";
+import { MealPlanCard } from "../components/MealPlanCard";
+import { WorkoutPlanCard } from "../components/WorkoutPlanCard";
 import { useHealthStore } from "../store/useHealthStore";
 import { formatReadableDate } from "../utils/dateUtils";
 import { calculateDynamicHealthScore } from "../utils/scoreCalculator";
 import { generateDailyInsight } from "../services/aiInsightService";
 import { getMetricPresentationList } from "../services/metricService";
 import { subscribeToSteps } from "../services/pedometerService";
-import type { DailyHealthRecord, HealthMetricKey } from "../types/health";
+import type { DailyHealthRecord, HealthMetricKey, WeeklyWorkoutPlan } from "../types/health";
 
 function metricValue(metric: HealthMetricKey, record: DailyHealthRecord): number {
   if (metric === "sleep") return record.sleep_hours;
@@ -25,113 +29,121 @@ function metricValue(metric: HealthMetricKey, record: DailyHealthRecord): number
 }
 
 function metricDisplayValue(metric: HealthMetricKey, value: number): string | number {
-  if (metric === "sleep" || metric === "weight") {
-    return value > 0 ? value.toFixed(1) : "0.0";
-  }
+  if (metric === "sleep" || metric === "weight") return value > 0 ? value.toFixed(1) : "0.0";
   return Math.round(value);
 }
 
 function chunkArray<T>(items: T[], size: number): T[][] {
   const result: T[][] = [];
-  for (let index = 0; index < items.length; index += size) {
-    result.push(items.slice(index, index + size));
-  }
+  for (let i = 0; i < items.length; i += size) result.push(items.slice(i, i + size));
   return result;
 }
 
-export function HomeScreen(): JSX.Element {
-  const profile = useHealthStore((state) => state.profile);
-  const todayRecord = useHealthStore((state) => state.todayRecord);
-  const weeklyRecords = useHealthStore((state) => state.weeklyRecords);
-  const activeMetrics = useHealthStore((state) => state.activeMetrics);
-  const reports = useHealthStore((state) => state.reports);
-  const aiPersonalization = useHealthStore((state) => state.aiPersonalization);
-  const isAnalyzingAi = useHealthStore((state) => state.isAnalyzingAi);
-  const setSteps = useHealthStore((state) => state.setSteps);
-  const [doctorInsight, setDoctorInsight] = useState("Loading your personalized insight...");
+function getTodayWorkoutKey(): keyof WeeklyWorkoutPlan {
+  const days: Array<keyof WeeklyWorkoutPlan> = ["sunday","monday","tuesday","wednesday","thursday","friday","saturday"];
+  return days[new Date().getDay()];
+}
 
-  // Auto-sync steps from pedometer in real-time.
+// ─── Section Header ───────────────────────────────────────────────────────────
+
+function SectionHeader({ icon, label, color }: { icon: string; label: string; color: string }): JSX.Element {
+  return (
+    <View className="flex-row items-center mb-3" style={{ gap: 8 }}>
+      <View style={{ backgroundColor: `${color}20`, borderRadius: 8, padding: 5 }}>
+        <MaterialCommunityIcons name={icon as never} size={13} color={color} />
+      </View>
+      <Text style={{ color, letterSpacing: 1.5, fontSize: 10, fontWeight: "700" }}>{label}</Text>
+    </View>
+  );
+}
+
+// ─── Screen ───────────────────────────────────────────────────────────────────
+
+export function HomeScreen(): JSX.Element {
+  const profile       = useHealthStore((s) => s.profile);
+  const todayRecord   = useHealthStore((s) => s.todayRecord);
+  const weeklyRecords = useHealthStore((s) => s.weeklyRecords);
+  const activeMetrics = useHealthStore((s) => s.activeMetrics);
+  const reports       = useHealthStore((s) => s.reports);
+  const aiPersonalization = useHealthStore((s) => s.aiPersonalization);
+  const isAnalyzingAi = useHealthStore((s) => s.isAnalyzingAi);
+  const setSteps      = useHealthStore((s) => s.setSteps);
+
+  const [doctorInsight, setDoctorInsight] = useState("Loading your personalized insight...");
+  const todayWorkoutKey = useMemo(() => getTodayWorkoutKey(), []);
+
   useEffect(() => {
-    const unsubscribe = subscribeToSteps((liveSteps) => {
-      void setSteps(liveSteps);
-    });
-    return unsubscribe;
+    const unsub = subscribeToSteps((liveSteps) => { void setSteps(liveSteps); });
+    return unsub;
   }, [setSteps]);
 
-  // Fetch AI-backed daily insight whenever key data changes.
   useEffect(() => {
     if (!profile || !todayRecord) return;
-    generateDailyInsight({
-      profile,
-      todayRecord,
-      weeklyRecords,
-      activeMetrics,
-      aiPersonalization
-    }).then(setDoctorInsight).catch(() => {
-      setDoctorInsight("Keep tracking consistently for better doctor-style insights.");
-    });
+    generateDailyInsight({ profile, todayRecord, weeklyRecords, activeMetrics, aiPersonalization })
+      .then(setDoctorInsight)
+      .catch(() => setDoctorInsight("Keep tracking consistently for better doctor-style insights."));
   }, [profile, todayRecord, weeklyRecords, activeMetrics, aiPersonalization]);
 
   const metricCards = useMemo(() => {
-    if (!profile) {
-      return [];
-    }
+    if (!profile) return [];
     return getMetricPresentationList(activeMetrics, profile, aiPersonalization?.metric_targets);
   }, [activeMetrics, aiPersonalization?.metric_targets, profile]);
 
   const score = useMemo(() => {
-    if (!profile || !todayRecord) {
-      return 0;
-    }
-    return calculateDynamicHealthScore(
-      todayRecord,
-      profile,
-      activeMetrics,
-      aiPersonalization?.metric_targets
-    ).score;
+    if (!profile || !todayRecord) return 0;
+    return calculateDynamicHealthScore(todayRecord, profile, activeMetrics, aiPersonalization?.metric_targets).score;
   }, [activeMetrics, aiPersonalization?.metric_targets, profile, todayRecord]);
 
-  if (!todayRecord || !profile) {
-    return <View className="flex-1" />;
-  }
+  if (!todayRecord || !profile) return <View className="flex-1" />;
 
   const rows = chunkArray(metricCards, 2);
+  const hasMealPlan    = !!(aiPersonalization?.meal_plan?.length);
+  const hasWorkoutPlan = !!aiPersonalization?.workout_plan;
+  const hasHealthTips  = !!(aiPersonalization?.health_tips?.length);
+  const hasAiPlan      = hasMealPlan || hasWorkoutPlan || hasHealthTips;
 
   return (
     <ScrollView
       className="flex-1"
-      contentContainerStyle={{ paddingBottom: 122 }}
+      contentContainerStyle={{ paddingBottom: 130 }}
       showsVerticalScrollIndicator={false}
     >
-      <View className="mt-2 flex-row items-center justify-between">
+      {/* ── Top header ─────────────────────────────────────────────── */}
+      <Animated.View entering={FadeInDown.duration(350)} className="mt-2 flex-row items-center justify-between">
         <View>
           <Text className="text-textMuted text-xs tracking-widest">TODAY</Text>
-          <Text className="text-white text-lg font-semibold mt-1">{formatReadableDate(todayRecord.date)}</Text>
+          <Text className="text-white text-xl font-bold mt-1">{formatReadableDate(todayRecord.date)}</Text>
         </View>
-        <View className="rounded-full border border-white/10 bg-cardMuted px-3 py-2">
-          <Text className="text-textMuted text-xs">{profile.goal.replace("_", " ")}</Text>
-        </View>
-      </View>
+        <LinearGradient
+          colors={["rgba(154,108,255,0.30)","rgba(79,123,255,0.20)"]}
+          start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+          style={{ borderRadius: 20, borderWidth: 1, borderColor: "rgba(255,255,255,0.15)", paddingHorizontal: 14, paddingVertical: 7 }}
+        >
+          <Text className="text-white text-xs font-semibold capitalize">{profile.goal.replace(/_/g, " ")}</Text>
+        </LinearGradient>
+      </Animated.View>
 
-      <View className="items-center mt-6">
+      {/* ── Health Score ────────────────────────────────────────────── */}
+      <Animated.View entering={FadeInDown.delay(80).duration(400)} className="items-center mt-6">
         <ScoreCircle score={score} />
-      </View>
+      </Animated.View>
 
-      <View className="mt-7" style={{ gap: 10 }}>
-        {rows.map((row, rowIndex) => (
-          <View key={`metric-row-${rowIndex}`} className="flex-row" style={{ gap: 10 }}>
-            {row.map((metric, metricIndex) => {
-              const value = metricValue(metric.key, todayRecord);
+      {/* ── Metrics ─────────────────────────────────────────────────── */}
+      <View className="mt-6" style={{ gap: 10 }}>
+        {rows.map((row, ri) => (
+          <View key={`row-${ri}`} className="flex-row" style={{ gap: 10 }}>
+            {row.map((metric, mi) => {
+              const val = metricValue(metric.key, todayRecord);
               return (
                 <MetricCard
                   key={metric.key}
                   label={metric.label}
-                  value={metricDisplayValue(metric.key, value)}
+                  value={metricDisplayValue(metric.key, val)}
                   unit={metric.unit}
                   goal={metric.goal}
                   icon={metric.icon}
                   accentColor={metric.color}
-                  delay={80 + rowIndex * 120 + metricIndex * 60}
+                  delay={100 + ri * 100 + mi * 50}
                 />
               );
             })}
@@ -140,44 +152,110 @@ export function HomeScreen(): JSX.Element {
         ))}
       </View>
 
+      {/* ── Doctor Insight ───────────────────────────────────────────── */}
       <View className="mt-5">
         <InsightCard title="Doctor Insight" message={doctorInsight} />
       </View>
 
-      {aiPersonalization ? (
-        <View className="mt-4 rounded-2xl border border-white/10 bg-card/80 p-4">
-          <View className="flex-row items-center">
-            <MaterialCommunityIcons name="brain" size={16} color="#9A6CFF" />
-            <Text className="text-textMuted text-xs tracking-widest ml-2">AI PERSONALIZATION</Text>
-          </View>
-          <Text className="text-white mt-3 leading-6">{aiPersonalization.summary}</Text>
-          <View className="mt-3" style={{ gap: 8 }}>
-            {aiPersonalization.doctor_focus.slice(0, 3).map((focus) => (
-              <View key={focus} className="flex-row items-start">
-                <View className="h-2 w-2 rounded-full bg-accentPurple mt-2" />
-                <Text className="text-textMuted ml-3 flex-1 leading-6">{focus}</Text>
-              </View>
-            ))}
-          </View>
-        </View>
-      ) : null}
+      {/* ── AI Plan section ─────────────────────────────────────────── */}
+      {hasAiPlan ? (
+        <Animated.View entering={FadeInDown.delay(200).duration(450)}>
 
-      <View className="mt-4 rounded-2xl border border-white/10 bg-card/80 p-4">
-        <View className="flex-row items-center justify-between">
-          <View className="flex-row items-center">
-            <MaterialCommunityIcons name="file-document-multiple-outline" size={16} color="#4F7BFF" />
-            <Text className="text-textMuted text-xs tracking-widest ml-2">HEALTH REPORTS</Text>
+          {/* AI Summary card */}
+          {aiPersonalization?.summary ? (
+            <View className="mt-4" style={{ borderRadius: 20, overflow: "hidden" }}>
+              <LinearGradient
+                colors={["rgba(154,108,255,0.18)","rgba(79,123,255,0.10)"]}
+                start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+                style={{ padding: 16, borderWidth: 1, borderColor: "rgba(154,108,255,0.30)", borderRadius: 20 }}
+              >
+                <SectionHeader icon="brain" label="AI CLINICAL PLAN" color="#9A6CFF" />
+                <Text className="text-white text-sm leading-6">{aiPersonalization.summary}</Text>
+                {aiPersonalization.doctor_focus?.length ? (
+                  <View className="mt-3" style={{ gap: 8 }}>
+                    {aiPersonalization.doctor_focus.slice(0, 3).map((focus, i) => (
+                      <View key={i} className="flex-row items-start">
+                        <View style={{ height: 6, width: 6, borderRadius: 3, backgroundColor: "#9A6CFF", marginTop: 7, marginRight: 10 }} />
+                        <Text className="text-textMuted text-sm flex-1 leading-5">{focus}</Text>
+                      </View>
+                    ))}
+                  </View>
+                ) : null}
+              </LinearGradient>
+            </View>
+          ) : null}
+
+          {/* Health Tips */}
+          {hasHealthTips ? (
+            <View className="mt-4" style={{ borderRadius: 20, overflow: "hidden" }}>
+              <LinearGradient
+                colors={["rgba(255,209,102,0.12)","rgba(255,209,102,0.04)"]}
+                start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+                style={{ padding: 16, borderWidth: 1, borderColor: "rgba(255,209,102,0.25)", borderRadius: 20 }}
+              >
+                <SectionHeader icon="lightbulb-on-outline" label="REPORT HEALTH TIPS" color="#FFD166" />
+                <View style={{ gap: 10 }}>
+                  {aiPersonalization!.health_tips!.map((tip, i) => (
+                    <View key={i} className="flex-row items-start">
+                      <View style={{ backgroundColor: "rgba(255,209,102,0.20)", borderRadius: 8, paddingHorizontal: 6, paddingVertical: 2, marginRight: 10, marginTop: 1 }}>
+                        <Text style={{ color: "#FFD166", fontSize: 10, fontWeight: "700" }}>{i + 1}</Text>
+                      </View>
+                      <Text className="text-white text-sm flex-1 leading-5">{tip}</Text>
+                    </View>
+                  ))}
+                </View>
+              </LinearGradient>
+            </View>
+          ) : null}
+
+          {/* Meal Plan */}
+          {hasMealPlan ? <MealPlanCard templates={aiPersonalization!.meal_plan!} /> : null}
+
+          {/* Workout Plan */}
+          {hasWorkoutPlan ? <WorkoutPlanCard plan={aiPersonalization!.workout_plan!} todayKey={todayWorkoutKey} /> : null}
+
+        </Animated.View>
+      ) : (
+        /* No AI plan yet — prompt card */
+        <Animated.View entering={FadeInDown.delay(200).duration(400)} className="mt-4">
+          <LinearGradient
+            colors={["rgba(154,108,255,0.10)","rgba(79,123,255,0.06)"]}
+            start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+            style={{ borderRadius: 20, borderWidth: 1, borderColor: "rgba(154,108,255,0.20)", padding: 16 }}
+          >
+            <SectionHeader icon="brain" label="AI PERSONALIZATION" color="#9A6CFF" />
+            <Text className="text-textMuted text-sm leading-6">
+              {isAnalyzingAi
+                ? "⏳ AI is analyzing your medical reports and building your personalized meal plan, workout, and health targets..."
+                : `Upload a blood test or prescription in the Log tab, then tap "Run AI Analysis" to get your personalized plan.`}
+            </Text>
+          </LinearGradient>
+        </Animated.View>
+      )}
+
+      {/* ── Reports footer ───────────────────────────────────────────── */}
+      <Animated.View entering={FadeInDown.delay(300).duration(400)} className="mt-4">
+        <View style={{ backgroundColor: "rgba(79,123,255,0.08)", borderRadius: 20, borderWidth: 1, borderColor: "rgba(79,123,255,0.18)", padding: 16 }}>
+          <View className="flex-row items-center justify-between mb-2">
+            <View className="flex-row items-center" style={{ gap: 8 }}>
+              <MaterialCommunityIcons name="file-document-multiple-outline" size={15} color="#4F7BFF" />
+              <Text className="text-accentBlue text-xs font-bold tracking-widest">HEALTH REPORTS</Text>
+            </View>
+            <View style={{ backgroundColor: "#4F7BFF", borderRadius: 10, paddingHorizontal: 8, paddingVertical: 3 }}>
+              <Text className="text-white text-xs font-bold">{reports.length}</Text>
+            </View>
           </View>
-          <Text className="text-white text-sm font-semibold">{reports.length}</Text>
+          <Text className="text-textMuted text-sm leading-5">
+            {isAnalyzingAi
+              ? "Analyzing reports — this takes 15-30 seconds..."
+              : hasAiPlan
+                ? `Personalized from ${reports.length} report${reports.length !== 1 ? "s" : ""}. Meal plan and workout are active.`
+                : reports.length > 0
+                  ? "Reports uploaded. Go to Log tab → run AI Analysis."
+                  : "No reports yet. Upload in the Log tab to unlock your AI health plan."}
+          </Text>
         </View>
-        <Text className="text-textMuted mt-3 leading-6">
-          {isAnalyzingAi
-            ? "AI is currently analyzing your reports and refreshing daily metric targets."
-            : aiPersonalization
-              ? "Your dashboard is actively personalized from uploaded reports and profile context."
-              : "Upload reports and run AI analysis to personalize what gets tracked."}
-        </Text>
-      </View>
+      </Animated.View>
     </ScrollView>
   );
 }
