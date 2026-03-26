@@ -3,8 +3,14 @@ import type {
   AiPersonalization,
   DailyHealthRecord,
   DailyHealthUpdates,
+  DoctorNote,
+  DoctorNoteInput,
   HealthReport,
   HealthReportInput,
+  Supplement,
+  SupplementInput,
+  SupplementLog,
+  SupplementTiming,
   UserProfile,
   UserProfileInput
 } from "../types/health";
@@ -15,6 +21,11 @@ const DAILY_TABLE = "daily_health";
 const PROFILE_TABLE = "user_profile";
 const REPORTS_TABLE = "health_reports";
 const AI_TABLE = "ai_personalization";
+const SETTINGS_TABLE = "app_settings";
+const WATCH_TABLE = "watch_data";
+const SUPPLEMENTS_TABLE = "supplements";
+const SUPPLEMENT_LOGS_TABLE = "supplement_logs";
+const DOCTOR_NOTES_TABLE = "doctor_notes";
 
 let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
 
@@ -134,6 +145,8 @@ function normalizeAiPersonalization(
   row: {
     active_metrics: string;
     metric_targets: string;
+    weekly_targets?: string | null;
+    monthly_targets?: string | null;
     doctor_focus: string;
     summary: string;
     source_report_ids: string;
@@ -166,6 +179,12 @@ function normalizeAiPersonalization(
   };
 
   // Restore extended plan fields from JSON columns
+  const weekly_targets = parseJsonField<AiPersonalization["weekly_targets"]>(row.weekly_targets);
+  if (weekly_targets) result.weekly_targets = weekly_targets;
+
+  const monthly_targets = parseJsonField<AiPersonalization["monthly_targets"]>(row.monthly_targets);
+  if (monthly_targets) result.monthly_targets = monthly_targets;
+
   const meal_plan = parseJsonField<AiPersonalization["meal_plan"]>(row.meal_plan);
   if (meal_plan) result.meal_plan = meal_plan;
 
@@ -235,6 +254,8 @@ async function createTables(db: SQLite.SQLiteDatabase): Promise<void> {
       id INTEGER PRIMARY KEY CHECK(id = 1),
       active_metrics TEXT NOT NULL DEFAULT '[]',
       metric_targets TEXT NOT NULL DEFAULT '{}',
+      weekly_targets TEXT,
+      monthly_targets TEXT,
       doctor_focus TEXT NOT NULL DEFAULT '[]',
       summary TEXT NOT NULL DEFAULT '',
       source_report_ids TEXT NOT NULL DEFAULT '[]',
@@ -242,6 +263,69 @@ async function createTables(db: SQLite.SQLiteDatabase): Promise<void> {
       meal_plan TEXT,
       workout_plan TEXT,
       health_tips TEXT
+    );
+  `);
+
+  await db.execAsync(`
+    CREATE TABLE IF NOT EXISTS ${SETTINGS_TABLE} (
+      id INTEGER PRIMARY KEY CHECK(id = 1),
+      theme_mode TEXT NOT NULL DEFAULT 'dark',
+      watch_connected INTEGER NOT NULL DEFAULT 0,
+      weekly_report_enabled INTEGER NOT NULL DEFAULT 0,
+      last_weekly_report TEXT,
+      meal_reminders_enabled INTEGER NOT NULL DEFAULT 0
+    );
+  `);
+
+  await db.execAsync(`
+    CREATE TABLE IF NOT EXISTS ${WATCH_TABLE} (
+      id INTEGER PRIMARY KEY CHECK(id = 1),
+      steps INTEGER,
+      heart_rate INTEGER,
+      resting_hr INTEGER,
+      spo2 REAL,
+      sleep_hours REAL,
+      calories_burned INTEGER,
+      stress_level INTEGER,
+      body_fat_pct REAL,
+      skin_temp_c REAL,
+      last_synced TEXT,
+      is_connected INTEGER NOT NULL DEFAULT 0
+    );
+  `);
+
+  await db.execAsync(`
+    CREATE TABLE IF NOT EXISTS ${SUPPLEMENTS_TABLE} (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      dosage TEXT NOT NULL DEFAULT '',
+      timing TEXT NOT NULL DEFAULT '["morning"]',
+      frequency TEXT NOT NULL DEFAULT 'daily',
+      notes TEXT,
+      is_active INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL
+    );
+  `);
+
+  await db.execAsync(`
+    CREATE TABLE IF NOT EXISTS ${SUPPLEMENT_LOGS_TABLE} (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      supplement_id INTEGER NOT NULL,
+      date TEXT NOT NULL,
+      timing TEXT NOT NULL,
+      taken_at TEXT,
+      UNIQUE(supplement_id, date, timing)
+    );
+  `);
+
+  await db.execAsync(`
+    CREATE TABLE IF NOT EXISTS ${DOCTOR_NOTES_TABLE} (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      title TEXT NOT NULL,
+      diagnosis TEXT NOT NULL DEFAULT '',
+      recommendations TEXT NOT NULL DEFAULT '',
+      source_report_id INTEGER,
+      created_at TEXT NOT NULL
     );
   `);
 }
@@ -291,6 +375,10 @@ async function ensureSchema(db: SQLite.SQLiteDatabase): Promise<void> {
     await db.execAsync(`ALTER TABLE ${AI_TABLE} ADD COLUMN workout_plan TEXT;`);
   if (!aiCols.has("health_tips"))
     await db.execAsync(`ALTER TABLE ${AI_TABLE} ADD COLUMN health_tips TEXT;`);
+  if (!aiCols.has("weekly_targets"))
+    await db.execAsync(`ALTER TABLE ${AI_TABLE} ADD COLUMN weekly_targets TEXT;`);
+  if (!aiCols.has("monthly_targets"))
+    await db.execAsync(`ALTER TABLE ${AI_TABLE} ADD COLUMN monthly_targets TEXT;`);
 }
 
 export async function initDatabase(): Promise<void> {
@@ -363,7 +451,8 @@ export async function getAiPersonalization(): Promise<AiPersonalization | null> 
     summary: string; source_report_ids: string; generated_at: string;
     meal_plan: string | null; workout_plan: string | null; health_tips: string | null;
   }>(
-    `SELECT active_metrics, metric_targets, doctor_focus, summary, source_report_ids, generated_at,
+    `SELECT active_metrics, metric_targets, weekly_targets, monthly_targets,
+            doctor_focus, summary, source_report_ids, generated_at,
             meal_plan, workout_plan, health_tips
      FROM ${AI_TABLE} WHERE id = 1`
   );
@@ -376,12 +465,15 @@ export async function saveAiPersonalization(plan: AiPersonalization): Promise<Ai
 
   await db.runAsync(
     `INSERT OR REPLACE INTO ${AI_TABLE}
-      (id, active_metrics, metric_targets, doctor_focus, summary, source_report_ids, generated_at,
+      (id, active_metrics, metric_targets, weekly_targets, monthly_targets,
+       doctor_focus, summary, source_report_ids, generated_at,
        meal_plan, workout_plan, health_tips)
-     VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       JSON.stringify(plan.active_metrics),
       JSON.stringify(plan.metric_targets),
+      plan.weekly_targets ? JSON.stringify(plan.weekly_targets) : null,
+      plan.monthly_targets ? JSON.stringify(plan.monthly_targets) : null,
       JSON.stringify(plan.doctor_focus),
       plan.summary,
       JSON.stringify(plan.source_report_ids),
@@ -469,4 +561,248 @@ export async function getWeeklyRecords(referenceDate: string): Promise<DailyHeal
 function toDate(dateKey: string): Date {
   const [year, month, day] = dateKey.split("-").map(Number);
   return new Date(year, (month || 1) - 1, day || 1);
+}
+
+// ─── Watch Data ───────────────────────────────────────────────────────────────
+
+import type { WatchData } from "../types/health";
+
+export async function getWatchData(): Promise<WatchData | null> {
+  const db = await getDb();
+  const row = await db.getFirstAsync<{
+    steps: number | null; heart_rate: number | null; resting_hr: number | null;
+    spo2: number | null; sleep_hours: number | null; calories_burned: number | null;
+    stress_level: number | null; body_fat_pct: number | null; skin_temp_c: number | null;
+    last_synced: string | null; is_connected: number;
+  }>(`SELECT * FROM ${WATCH_TABLE} WHERE id = 1`);
+  if (!row) return null;
+  return {
+    steps: row.steps ?? undefined,
+    heart_rate: row.heart_rate ?? undefined,
+    resting_hr: row.resting_hr ?? undefined,
+    spo2: row.spo2 ?? undefined,
+    sleep_hours: row.sleep_hours ?? undefined,
+    calories_burned: row.calories_burned ?? undefined,
+    stress_level: row.stress_level ?? undefined,
+    body_fat_pct: row.body_fat_pct ?? undefined,
+    skin_temp_c: row.skin_temp_c ?? undefined,
+    last_synced: row.last_synced ?? undefined,
+    is_connected: row.is_connected === 1
+  };
+}
+
+export async function saveWatchData(data: WatchData): Promise<void> {
+  const db = await getDb();
+  await db.runAsync(
+    `INSERT OR REPLACE INTO ${WATCH_TABLE}
+      (id, steps, heart_rate, resting_hr, spo2, sleep_hours, calories_burned,
+       stress_level, body_fat_pct, skin_temp_c, last_synced, is_connected)
+     VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      data.steps ?? null, data.heart_rate ?? null, data.resting_hr ?? null,
+      data.spo2 ?? null, data.sleep_hours ?? null, data.calories_burned ?? null,
+      data.stress_level ?? null, data.body_fat_pct ?? null, data.skin_temp_c ?? null,
+      data.last_synced ?? null, data.is_connected ? 1 : 0
+    ]
+  );
+}
+
+// ─── App Settings ─────────────────────────────────────────────────────────────
+
+export type AppSettings = {
+  watch_connected: boolean;
+  weekly_report_enabled: boolean;
+  last_weekly_report: string | null;
+  meal_reminders_enabled: boolean;
+};
+
+export async function getAppSettings(): Promise<AppSettings> {
+  const db = await getDb();
+  const row = await db.getFirstAsync<{
+    watch_connected: number;
+    weekly_report_enabled: number;
+    last_weekly_report: string | null;
+    meal_reminders_enabled: number;
+  }>(`SELECT * FROM ${SETTINGS_TABLE} WHERE id = 1`);
+  if (!row) {
+    return { watch_connected: false, weekly_report_enabled: false,
+             last_weekly_report: null, meal_reminders_enabled: false };
+  }
+  return {
+    watch_connected: row.watch_connected === 1,
+    weekly_report_enabled: row.weekly_report_enabled === 1,
+    last_weekly_report: row.last_weekly_report,
+    meal_reminders_enabled: row.meal_reminders_enabled === 1
+  };
+}
+
+export async function saveAppSettings(settings: Partial<AppSettings>): Promise<void> {
+  const db = await getDb();
+  const current = await getAppSettings();
+  const merged = { ...current, ...settings };
+  await db.runAsync(
+    `INSERT OR REPLACE INTO ${SETTINGS_TABLE}
+      (id, watch_connected, weekly_report_enabled, last_weekly_report, meal_reminders_enabled)
+     VALUES (1, ?, ?, ?, ?)`,
+    [
+      merged.watch_connected ? 1 : 0,
+      merged.weekly_report_enabled ? 1 : 0,
+      merged.last_weekly_report ?? null,
+      merged.meal_reminders_enabled ? 1 : 0
+    ]
+  );
+}
+
+// ─── Extended AI Personalization (weekly/monthly targets) ─────────────────────
+
+export async function saveWeeklyMonthlyTargets(
+  weekly: import("../types/health").MetricTargets,
+  monthly: import("../types/health").MetricTargets
+): Promise<void> {
+  const db = await getDb();
+  await db.runAsync(
+    `UPDATE ${AI_TABLE} SET weekly_targets = ?, monthly_targets = ? WHERE id = 1`,
+    [JSON.stringify(weekly), JSON.stringify(monthly)]
+  );
+}
+
+// ─── Supplements ──────────────────────────────────────────────────────────────
+
+function normalizeSupplementRow(row: {
+  id: number; name: string; dosage: string; timing: string;
+  frequency: string; notes: string | null; is_active: number; created_at: string;
+}): Supplement {
+  let timing: SupplementTiming[] = ["morning"];
+  try {
+    const parsed = JSON.parse(row.timing);
+    if (Array.isArray(parsed)) timing = parsed as SupplementTiming[];
+  } catch { /* use default */ }
+  return {
+    id: Number(row.id),
+    name: row.name,
+    dosage: row.dosage,
+    timing,
+    frequency: row.frequency as Supplement["frequency"],
+    notes: row.notes ?? undefined,
+    is_active: row.is_active === 1,
+    created_at: row.created_at,
+  };
+}
+
+export async function getSupplements(): Promise<Supplement[]> {
+  const db = await getDb();
+  const rows = await db.getAllAsync<{
+    id: number; name: string; dosage: string; timing: string;
+    frequency: string; notes: string | null; is_active: number; created_at: string;
+  }>(`SELECT * FROM ${SUPPLEMENTS_TABLE} ORDER BY created_at ASC`);
+  return rows.map(normalizeSupplementRow);
+}
+
+export async function addSupplement(input: SupplementInput): Promise<Supplement> {
+  const db = await getDb();
+  const now = new Date().toISOString();
+  const result = await db.runAsync(
+    `INSERT INTO ${SUPPLEMENTS_TABLE} (name, dosage, timing, frequency, notes, is_active, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [input.name, input.dosage, JSON.stringify(input.timing), input.frequency,
+     input.notes ?? null, input.is_active ? 1 : 0, now]
+  );
+  const row = await db.getFirstAsync<{
+    id: number; name: string; dosage: string; timing: string;
+    frequency: string; notes: string | null; is_active: number; created_at: string;
+  }>(`SELECT * FROM ${SUPPLEMENTS_TABLE} WHERE id = ?`, [result.lastInsertRowId]);
+  if (!row) throw new Error("Failed to save supplement.");
+  return normalizeSupplementRow(row);
+}
+
+export async function deleteSupplement(id: number): Promise<void> {
+  const db = await getDb();
+  await db.runAsync(`DELETE FROM ${SUPPLEMENTS_TABLE} WHERE id = ?`, [id]);
+  await db.runAsync(`DELETE FROM ${SUPPLEMENT_LOGS_TABLE} WHERE supplement_id = ?`, [id]);
+}
+
+export async function clearAllSupplements(): Promise<void> {
+  const db = await getDb();
+  await db.runAsync(`DELETE FROM ${SUPPLEMENTS_TABLE}`);
+  await db.runAsync(`DELETE FROM ${SUPPLEMENT_LOGS_TABLE}`);
+}
+
+// ─── Supplement Logs ──────────────────────────────────────────────────────────
+
+export async function getTodaySupplementLogs(date: string): Promise<SupplementLog[]> {
+  const db = await getDb();
+  const rows = await db.getAllAsync<{
+    id: number; supplement_id: number; date: string; timing: string; taken_at: string | null;
+  }>(`SELECT * FROM ${SUPPLEMENT_LOGS_TABLE} WHERE date = ?`, [date]);
+  return rows.map((r) => ({
+    id: Number(r.id),
+    supplement_id: Number(r.supplement_id),
+    date: r.date,
+    timing: r.timing as SupplementTiming,
+    taken_at: r.taken_at,
+  }));
+}
+
+export async function markSupplementTaken(
+  supplement_id: number, date: string, timing: SupplementTiming
+): Promise<void> {
+  const db = await getDb();
+  const now = new Date().toISOString();
+  await db.runAsync(
+    `INSERT OR REPLACE INTO ${SUPPLEMENT_LOGS_TABLE} (supplement_id, date, timing, taken_at)
+     VALUES (?, ?, ?, ?)`,
+    [supplement_id, date, timing, now]
+  );
+}
+
+export async function unmarkSupplementTaken(
+  supplement_id: number, date: string, timing: SupplementTiming
+): Promise<void> {
+  const db = await getDb();
+  await db.runAsync(
+    `DELETE FROM ${SUPPLEMENT_LOGS_TABLE} WHERE supplement_id = ? AND date = ? AND timing = ?`,
+    [supplement_id, date, timing]
+  );
+}
+
+// ─── Doctor Notes ─────────────────────────────────────────────────────────────
+
+export async function getDoctorNotes(): Promise<DoctorNote[]> {
+  const db = await getDb();
+  const rows = await db.getAllAsync<{
+    id: number; title: string; diagnosis: string;
+    recommendations: string; source_report_id: number | null; created_at: string;
+  }>(`SELECT * FROM ${DOCTOR_NOTES_TABLE} ORDER BY created_at DESC`);
+  return rows.map((r) => ({
+    id: Number(r.id),
+    title: r.title,
+    diagnosis: r.diagnosis,
+    recommendations: r.recommendations,
+    source_report_id: r.source_report_id ? Number(r.source_report_id) : null,
+    created_at: r.created_at,
+  }));
+}
+
+export async function saveDoctorNote(input: DoctorNoteInput): Promise<DoctorNote> {
+  const db = await getDb();
+  const now = new Date().toISOString();
+  const result = await db.runAsync(
+    `INSERT INTO ${DOCTOR_NOTES_TABLE} (title, diagnosis, recommendations, source_report_id, created_at)
+     VALUES (?, ?, ?, ?, ?)`,
+    [input.title, input.diagnosis, input.recommendations, input.source_report_id ?? null, now]
+  );
+  const row = await db.getFirstAsync<{
+    id: number; title: string; diagnosis: string;
+    recommendations: string; source_report_id: number | null; created_at: string;
+  }>(`SELECT * FROM ${DOCTOR_NOTES_TABLE} WHERE id = ?`, [result.lastInsertRowId]);
+  if (!row) throw new Error("Failed to save doctor note.");
+  return { id: Number(row.id), title: row.title, diagnosis: row.diagnosis,
+           recommendations: row.recommendations,
+           source_report_id: row.source_report_id ? Number(row.source_report_id) : null,
+           created_at: row.created_at };
+}
+
+export async function clearDoctorNotes(): Promise<void> {
+  const db = await getDb();
+  await db.runAsync(`DELETE FROM ${DOCTOR_NOTES_TABLE}`);
 }

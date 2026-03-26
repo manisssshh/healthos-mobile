@@ -4,19 +4,73 @@
     "slug": "healthos-mobile",
     "version": "1.0.0",
     "orientation": "portrait",
-    "userInterfaceStyle": "dark",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "cover",
+      "backgroundColor": "#060608"
+    },
     "assetBundlePatterns": [
       "**/*"
     ],
     "ios": {
-      "supportsTablet": true
+      "icon": "./assets/icon.png",
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSCalendarsUsageDescription": "HealthOS adds weekly progress reminders to your calendar.",
+        "NSHealthShareUsageDescription": "HealthOS reads health data from your Galaxy Watch 4 via Health Connect.",
+        "NSHealthUpdateUsageDescription": "HealthOS writes health metrics to improve tracking accuracy."
+      }
     },
-    "android": {},
+    "android": {
+      "icon": "./assets/icon.png",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#060608"
+      },
+      "permissions": [
+        "android.permission.health.READ_STEPS",
+        "android.permission.health.READ_HEART_RATE",
+        "android.permission.health.READ_SLEEP",
+        "android.permission.health.READ_TOTAL_CALORIES_BURNED",
+        "android.permission.health.READ_OXYGEN_SATURATION",
+        "android.permission.health.READ_RESTING_HEART_RATE",
+        "android.permission.health.READ_BODY_FAT",
+        "android.permission.health.READ_WEIGHT",
+        "android.permission.RECEIVE_BOOT_COMPLETED",
+        "android.permission.SCHEDULE_EXACT_ALARM",
+        "android.permission.READ_CALENDAR",
+        "android.permission.WRITE_CALENDAR"
+      ],
+      "package": "com.manishraj.healthosmobile"
+    },
     "web": {
-      "bundler": "metro"
+      "bundler": "metro",
+      "favicon": "./assets/favicon.png"
     },
     "plugins": [
-      "expo-sqlite"
-    ]
+      "expo-sqlite",
+      "expo-calendar",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png",
+          "color": "#4F7BFF",
+          "sounds": []
+        }
+      ],
+      [
+        "react-native-health-connect",
+        {
+          "package": "com.samsung.android.wear.shealth"
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "c51fb951-40e6-4154-a0eb-7681395cbb6a"
+      }
+    }
   }
 }

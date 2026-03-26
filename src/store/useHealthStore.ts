@@ -18,27 +18,50 @@ import {
 import type {
   AiPersonalization,
   DailyHealthRecord,
+  DoctorNote,
   HealthMetricKey,
   HealthReport,
   HealthReportInput,
+  MetricTargets,
+  Supplement,
+  SupplementLog,
+  SupplementTiming,
   UserProfile,
-  UserProfileInput
+  UserProfileInput,
+  WatchData
 } from "../types/health";
 import {
   addHealthReport,
   getAiPersonalization,
+  getAppSettings,
   getHealthReports,
   getOrCreateDailyRecord,
   getUserProfile,
+  getWatchData,
   getWeeklyRecords,
   initDatabase,
   resetDailyRecord,
+  saveAppSettings,
   saveAiPersonalization,
+  saveWatchData,
   updateDailyRecord,
   upsertUserProfile,
-  deleteHealthReport
+  deleteHealthReport,
+  getSupplements,
+  addSupplement,
+  deleteSupplement,
+  clearAllSupplements,
+  getTodaySupplementLogs,
+  markSupplementTaken,
+  unmarkSupplementTaken,
+  getDoctorNotes,
+  saveDoctorNote,
+  clearDoctorNotes,
 } from "../services/storageService";
+import type { AppSettings } from "../services/storageService";
 import { analyzeReportsForPersonalization } from "../services/aiPersonalizationService";
+import { extractSupplementsFromPrescriptions } from "../services/supplementAiService";
+import { rescheduleAllSupplementReminders, cancelSupplementReminders } from "../services/supplementReminderService";
 import { resolveActiveMetrics } from "../services/metricService";
 import { getTodayDateKey } from "../utils/dateUtils";
 
@@ -53,6 +76,14 @@ type HealthStore = {
   isLoading: boolean;
   isAnalyzingAi: boolean;
   aiError: string | null;
+  watchData: WatchData | null;
+  appSettings: AppSettings;
+  // Supplements
+  supplements: Supplement[];
+  doctorNotes: DoctorNote[];
+  todaySupplementLogs: SupplementLog[];
+  isAnalyzingSupplements: boolean;
+  supplementError: string | null;
   initialize: () => Promise<void>;
   ensureTodayRecord: () => Promise<void>;
   saveProfile: (profile: UserProfileInput) => Promise<void>;
@@ -72,6 +103,14 @@ type HealthStore = {
   setBloodSugar: (mgdl: number) => Promise<void>;
   resetToday: () => Promise<void>;
   refreshWeeklyRecords: () => Promise<void>;
+  syncWatchData: (data: WatchData) => Promise<void>;
+  updateAppSettings: (settings: Partial<AppSettings>) => Promise<void>;
+  // Supplement actions
+  analyzeDocPrescriptions: () => Promise<void>;
+  markSupplementDose: (supplementId: number, timing: SupplementTiming, taken: boolean) => Promise<void>;
+  removeSupplementEntry: (id: number) => Promise<void>;
+  clearSupplementError: () => void;
+  refreshSupplements: () => Promise<void>;
 };
 
 function clampNumber(value: number, min: number, max: number): number {
@@ -95,6 +134,13 @@ function normalizeProfileInput(input: UserProfileInput): UserProfileInput {
   };
 }
 
+const DEFAULT_SETTINGS: AppSettings = {
+  watch_connected: false,
+  weekly_report_enabled: false,
+  last_weekly_report: null,
+  meal_reminders_enabled: false
+};
+
 export const useHealthStore = create<HealthStore>((set, get) => ({
   profile: null,
   reports: [],
@@ -106,17 +152,29 @@ export const useHealthStore = create<HealthStore>((set, get) => ({
   isLoading: true,
   isAnalyzingAi: false,
   aiError: null,
+  watchData: null,
+  appSettings: DEFAULT_SETTINGS,
+  supplements: [],
+  doctorNotes: [],
+  todaySupplementLogs: [],
+  isAnalyzingSupplements: false,
+  supplementError: null,
 
   initialize: async () => {
     set({ isLoading: true });
     await initDatabase();
 
-    const [profile, reports, aiPersonalization] = await Promise.all([
+    const todayDate = getTodayDateKey();
+    const [profile, reports, aiPersonalization, watchData, appSettings, supplements, doctorNotes, todaySupplementLogs] = await Promise.all([
       getUserProfile(),
       getHealthReports(),
-      getAiPersonalization()
+      getAiPersonalization(),
+      getWatchData(),
+      getAppSettings(),
+      getSupplements(),
+      getDoctorNotes(),
+      getTodaySupplementLogs(todayDate),
     ]);
-    const todayDate = getTodayDateKey();
 
     if (!profile) {
       set({
@@ -128,6 +186,11 @@ export const useHealthStore = create<HealthStore>((set, get) => ({
         weeklyRecords: [],
         currentDate: todayDate,
         aiError: null,
+        watchData,
+        appSettings,
+        supplements,
+        doctorNotes,
+        todaySupplementLogs,
         isLoading: false
       });
       return;
@@ -147,6 +210,11 @@ export const useHealthStore = create<HealthStore>((set, get) => ({
       weeklyRecords,
       currentDate: todayDate,
       aiError: null,
+      watchData,
+      appSettings,
+      supplements,
+      doctorNotes,
+      todaySupplementLogs,
       isLoading: false
     });
   },
@@ -229,6 +297,13 @@ export const useHealthStore = create<HealthStore>((set, get) => ({
     set({ isAnalyzingAi: true, aiError: null });
     try {
       const plan = await analyzeReportsForPersonalization(profile, reports);
+
+      // Auto-derive weekly and monthly targets from the AI plan
+      const weeklyTargets = deriveWeeklyTargets(plan.metric_targets, profile);
+      const monthlyTargets = deriveMonthlyTargets(plan.metric_targets, profile);
+      plan.weekly_targets = weeklyTargets;
+      plan.monthly_targets = monthlyTargets;
+
       const savedPlan = await saveAiPersonalization(plan);
       set({
         aiPersonalization: savedPlan,
@@ -386,5 +461,130 @@ export const useHealthStore = create<HealthStore>((set, get) => ({
     const resetRecord = await resetDailyRecord(today.date);
     set({ todayRecord: resetRecord });
     await get().refreshWeeklyRecords();
-  }
+  },
+
+  syncWatchData: async (data: WatchData) => {
+    await saveWatchData(data);
+    set({ watchData: data });
+
+    // Auto-update today's record with watch data
+    const { todayRecord, profile } = get();
+    if (!todayRecord || !profile) return;
+
+    const updates: Partial<DailyHealthRecord> = {};
+    if (data.steps !== undefined) updates.steps = data.steps;
+    if (data.heart_rate !== undefined) updates.heart_rate = data.heart_rate;
+    if (data.sleep_hours !== undefined) updates.sleep_hours = Number(data.sleep_hours.toFixed(1));
+
+    if (Object.keys(updates).length > 0) {
+      const updatedRecord = { ...todayRecord, ...updates };
+      set({ todayRecord: updatedRecord });
+      await updateDailyRecord(todayRecord.date, updates, profile.weight);
+      await get().refreshWeeklyRecords();
+    }
+  },
+
+  updateAppSettings: async (settings: Partial<AppSettings>) => {
+    await saveAppSettings(settings);
+    const updated = await getAppSettings();
+    set({ appSettings: updated });
+  },
+
+  // ── Supplements ──────────────────────────────────────────────────────────────
+
+  refreshSupplements: async () => {
+    const todayDate = get().currentDate;
+    const [supplements, doctorNotes, todaySupplementLogs] = await Promise.all([
+      getSupplements(),
+      getDoctorNotes(),
+      getTodaySupplementLogs(todayDate),
+    ]);
+    set({ supplements, doctorNotes, todaySupplementLogs });
+  },
+
+  analyzeDocPrescriptions: async () => {
+    const reports = get().reports;
+    const prescriptions = reports.filter((r) => r.type === "prescription");
+    if (!prescriptions.length) {
+      set({ supplementError: "Upload a doctor's prescription first." });
+      return;
+    }
+
+    set({ isAnalyzingSupplements: true, supplementError: null });
+    try {
+      const result = await extractSupplementsFromPrescriptions(reports);
+
+      // Clear existing AI-extracted supplements & doctor notes, then replace
+      await clearAllSupplements();
+      await clearDoctorNotes();
+
+      // Save new doctor note
+      await saveDoctorNote(result.doctorNote);
+
+      // Save all extracted supplements
+      for (const input of result.supplements) {
+        await addSupplement(input);
+      }
+
+      // Reload from DB and reschedule notifications
+      const [supplements, doctorNotes, todaySupplementLogs] = await Promise.all([
+        getSupplements(),
+        getDoctorNotes(),
+        getTodaySupplementLogs(get().currentDate),
+      ]);
+
+      set({ supplements, doctorNotes, todaySupplementLogs, isAnalyzingSupplements: false });
+      void rescheduleAllSupplementReminders(supplements);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Could not extract supplements.";
+      set({ isAnalyzingSupplements: false, supplementError: message });
+    }
+  },
+
+  markSupplementDose: async (supplementId: number, timing: SupplementTiming, taken: boolean) => {
+    const date = get().currentDate;
+    if (taken) {
+      await markSupplementTaken(supplementId, date, timing);
+    } else {
+      await unmarkSupplementTaken(supplementId, date, timing);
+    }
+    const logs = await getTodaySupplementLogs(date);
+    set({ todaySupplementLogs: logs });
+  },
+
+  removeSupplementEntry: async (id: number) => {
+    await deleteSupplement(id);
+    await cancelSupplementReminders(id);
+    const supplements = await getSupplements();
+    set({ supplements });
+  },
+
+  clearSupplementError: () => {
+    set({ supplementError: null });
+  },
 }));
+
+// ─── Auto-derive weekly / monthly targets ─────────────────────────────────────
+
+function deriveWeeklyTargets(
+  base: MetricTargets,
+  profile: UserProfile
+): MetricTargets {
+  const weekly: MetricTargets = { ...base };
+  // For week 1, set slightly progressive targets (5–10% increase toward goal)
+  if (weekly.steps) weekly.steps = Math.round(weekly.steps * 1.05);
+  if (weekly.water) weekly.water = Math.round(weekly.water * 1.0);
+  if (weekly.sleep) weekly.sleep = weekly.sleep; // sleep target stays
+  return weekly;
+}
+
+function deriveMonthlyTargets(
+  base: MetricTargets,
+  profile: UserProfile
+): MetricTargets {
+  const monthly: MetricTargets = { ...base };
+  // Monthly targets are the full AI-recommended targets (not incremental)
+  if (monthly.steps) monthly.steps = Math.round(monthly.steps * 1.15);
+  if (monthly.water) monthly.water = Math.round(monthly.water * 1.1);
+  return monthly;
+}

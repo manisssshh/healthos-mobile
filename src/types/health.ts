@@ -8,6 +8,43 @@ export type HealthCondition =
 
 export type ReportType = "blood_test" | "prescription";
 
+// ─── Supplement Types ─────────────────────────────────────────────────────────
+
+export type SupplementTiming = "morning" | "afternoon" | "evening" | "night";
+export type SupplementFrequency = "daily" | "twice_daily" | "weekly" | "as_needed";
+
+export type Supplement = {
+  id: number;
+  name: string;
+  dosage: string;
+  timing: SupplementTiming[];
+  frequency: SupplementFrequency;
+  notes?: string;
+  is_active: boolean;
+  created_at: string;
+};
+
+export type SupplementInput = Omit<Supplement, "id" | "created_at">;
+
+export type DoctorNote = {
+  id: number;
+  title: string;
+  diagnosis: string;
+  recommendations: string;
+  source_report_id: number | null;
+  created_at: string;
+};
+
+export type DoctorNoteInput = Omit<DoctorNote, "id" | "created_at">;
+
+export type SupplementLog = {
+  id: number;
+  supplement_id: number;
+  date: string;
+  timing: SupplementTiming;
+  taken_at: string | null;
+};
+
 export type HealthMetricKey =
   | "sleep"
   | "steps"
@@ -20,6 +57,58 @@ export type HealthMetricKey =
   | "blood_sugar";
 
 export type MetricTargets = Partial<Record<HealthMetricKey, number>>;
+
+export type ThemeMode = "dark" | "light";
+
+// ─── Performance Zone ────────────────────────────────────────────────────────
+
+export type PerformanceZone = "high" | "medium" | "low";
+
+export function getPerformanceZone(scorePercent: number): PerformanceZone {
+  if (scorePercent >= 67) return "high";
+  if (scorePercent >= 34) return "medium";
+  return "low";
+}
+
+export function getZoneColor(zone: PerformanceZone): string {
+  if (zone === "high") return "#1AE5A7";
+  if (zone === "medium") return "#FFB238";
+  return "#FF4158";
+}
+
+export function getZoneLabel(zone: PerformanceZone): string {
+  if (zone === "high") return "Peak";
+  if (zone === "medium") return "Moderate";
+  return "Low";
+}
+
+// ─── Watch Data (Samsung Galaxy Watch 4 / Android Health Connect) ────────────
+
+export type WatchData = {
+  steps?: number;
+  heart_rate?: number;
+  resting_hr?: number;
+  spo2?: number;            // Blood oxygen saturation %
+  sleep_hours?: number;
+  calories_burned?: number; // Active calories burned
+  stress_level?: number;    // 0–100
+  body_fat_pct?: number;    // Body fat percentage
+  skin_temp_c?: number;     // Skin temperature celsius
+  last_synced?: string;     // ISO timestamp
+  is_connected?: boolean;
+};
+
+// ─── Weekly / Monthly Target Periods ─────────────────────────────────────────
+
+export type TargetPeriod = {
+  week_start: string;  // YYYY-MM-DD
+  week_end: string;
+  targets: MetricTargets;
+  generated_from_report_ids: number[];
+  created_at: string;
+};
+
+// ─── User Profile ─────────────────────────────────────────────────────────────
 
 export type UserProfile = {
   age: number;
@@ -99,6 +188,10 @@ export type WeeklyWorkoutPlan = {
 export type AiPersonalization = {
   active_metrics: HealthMetricKey[];
   metric_targets: MetricTargets;
+  /** Weekly targets auto-derived from report analysis */
+  weekly_targets?: MetricTargets;
+  /** Monthly targets auto-derived from report analysis */
+  monthly_targets?: MetricTargets;
   doctor_focus: string[];
   summary: string;
   source_report_ids: number[];
@@ -110,6 +203,8 @@ export type AiPersonalization = {
   /** Short actionable health tips from report analysis */
   health_tips?: string[];
 };
+
+// ─── Daily Health Record ─────────────────────────────────────────────────────
 
 export type DailyHealthRecord = {
   date: string;
@@ -126,6 +221,8 @@ export type DailyHealthRecord = {
 };
 
 export type DailyHealthUpdates = Partial<Omit<DailyHealthRecord, "date">>;
+
+// ─── Constants ───────────────────────────────────────────────────────────────
 
 export const WATER_GOAL_ML = 3000;
 export const STEP_GOAL = 10000;

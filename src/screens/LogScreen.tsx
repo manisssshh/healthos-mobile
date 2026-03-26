@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from "react-native";
-import Animated, { useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
+import { ActivityIndicator, Alert, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import Animated, { FadeInDown, useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
+import { LinearGradient } from "expo-linear-gradient";
 import { ProgressBar } from "../components/ProgressBar";
+import { MealTracker } from "../components/MealTracker";
 import { useHealthStore } from "../store/useHealthStore";
+import { useTheme } from "../context/ThemeContext";
 import {
-  MAX_CALORIES_ENTRY,
-  MAX_FOOD_INTAKE_LENGTH,
   MAX_SLEEP_HOURS_ENTRY,
   MAX_STEPS_ENTRY,
   MAX_WATER_ML_ENTRY,
@@ -26,105 +27,151 @@ import type { ReportType } from "../types/health";
 import { pickAndStoreReportFile } from "../services/reportFileService";
 import { AI_ANALYSIS_PROGRESS_STEPS } from "../services/aiPersonalizationService";
 import { getTodayDateKey } from "../utils/dateUtils";
+import { syncGalaxyWatch4, isHealthConnectAvailable } from "../services/samsungHealthService";
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
-type ScaleButtonProps = {
-  label: string;
-  onPress: () => void;
-  variant?: "primary" | "secondary";
-};
-
-function ScaleButton({ label, onPress, variant = "primary" }: ScaleButtonProps): JSX.Element {
+function ScaleButton({ label, onPress, variant = "primary", color }: {
+  label: string; onPress: () => void;
+  variant?: "primary" | "secondary"; color?: string;
+}): JSX.Element {
+  const { colors } = useTheme();
   const scale = useSharedValue(1);
-  const animatedStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: scale.value }]
-  }));
+  const animatedStyle = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
 
-  const buttonClass =
-    variant === "primary"
-      ? "rounded-2xl px-4 py-3 bg-accentBlue"
-      : "rounded-2xl px-4 py-3 bg-cardMuted border border-white/10";
-  const textClass = variant === "primary" ? "text-white font-semibold" : "text-textMuted font-semibold";
+  const bg = variant === "primary" ? (color ?? colors.accentBlue) : colors.cardMuted;
+  const tc = variant === "primary" ? "#FFFFFF" : colors.textMuted;
 
   return (
     <AnimatedPressable
       onPress={onPress}
-      onPressIn={() => {
-        scale.value = withTiming(0.96, { duration: 90 });
-      }}
-      onPressOut={() => {
-        scale.value = withTiming(1, { duration: 120 });
-      }}
-      style={animatedStyle}
-      className={buttonClass}
+      onPressIn={() => { scale.value = withTiming(0.96, { duration: 90 }); }}
+      onPressOut={() => { scale.value = withTiming(1, { duration: 120 }); }}
+      style={[animatedStyle, {
+        borderRadius: 14, paddingHorizontal: 16, paddingVertical: 11,
+        backgroundColor: bg,
+        borderWidth: variant === "secondary" ? 1 : 0,
+        borderColor: colors.border
+      }]}
     >
-      <Text className={textClass}>{label}</Text>
+      <Text style={{ color: tc, fontWeight: "700", fontSize: 13 }}>{label}</Text>
     </AnimatedPressable>
   );
 }
 
-export function LogScreen(): JSX.Element {
-  const todayRecord = useHealthStore((state) => state.todayRecord);
-  const activeMetrics = useHealthStore((state) => state.activeMetrics);
-  const reports = useHealthStore((state) => state.reports);
-  const aiPersonalization = useHealthStore((state) => state.aiPersonalization);
-  const isAnalyzingAi = useHealthStore((state) => state.isAnalyzingAi);
-  const aiError = useHealthStore((state) => state.aiError);
-  const clearAiError = useHealthStore((state) => state.clearAiError);
-  const runAiPersonalization = useHealthStore((state) => state.runAiPersonalization);
-  const addReport = useHealthStore((state) => state.addReport);
-  const removeReport = useHealthStore((state) => state.removeReport);
-  const addWater = useHealthStore((state) => state.addWater);
-  const setSteps = useHealthStore((state) => state.setSteps);
-  const setSleep = useHealthStore((state) => state.setSleep);
-  const setCalories = useHealthStore((state) => state.setCalories);
-  const setWeight = useHealthStore((state) => state.setWeight);
-  const setFoodIntake = useHealthStore((state) => state.setFoodIntake);
-  const setBloodPressure = useHealthStore((state) => state.setBloodPressure);
-  const setHeartRate = useHealthStore((state) => state.setHeartRate);
-  const setBloodSugar = useHealthStore((state) => state.setBloodSugar);
-  const resetToday = useHealthStore((state) => state.resetToday);
+function SectionCard({ title, subtitle, children, accentColor = "#4F7BFF", icon }: {
+  title: string; subtitle?: string; children: React.ReactNode;
+  accentColor?: string; icon?: string;
+}): JSX.Element {
+  const { colors } = useTheme();
+  return (
+    <View style={{
+      backgroundColor: colors.card,
+      borderRadius: 20, borderWidth: 1,
+      borderColor: colors.border, padding: 16
+    }}>
+      <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 12, gap: 8 }}>
+        {icon ? (
+          <View style={{
+            backgroundColor: `${accentColor}20`, borderRadius: 8,
+            width: 30, height: 30, alignItems: "center", justifyContent: "center"
+          }}>
+            <MaterialCommunityIcons name={icon as never} size={14} color={accentColor} />
+          </View>
+        ) : null}
+        <View>
+          <Text style={{ color: colors.text, fontSize: 15, fontWeight: "700" }}>{title}</Text>
+          {subtitle ? <Text style={{ color: colors.textMuted, fontSize: 11, marginTop: 1 }}>{subtitle}</Text> : null}
+        </View>
+      </View>
+      {children}
+    </View>
+  );
+}
 
-  const [customWater, setCustomWater] = useState("");
-  const [stepsInput, setStepsInput] = useState("");
-  const [sleepInput, setSleepInput] = useState("");
-  const [caloriesInput, setCaloriesInput] = useState("");
-  const [weightInput, setWeightInput] = useState("");
-  const [foodIntakeInput, setFoodIntakeInput] = useState("");
-  
-  const [bpSysInput, setBpSysInput] = useState("");
-  const [bpDiaInput, setBpDiaInput] = useState("");
+function MetricInput({ value, onChangeText, placeholder, keyboardType = "numeric", maxLength }: {
+  value: string; onChangeText: (v: string) => void;
+  placeholder: string; keyboardType?: "numeric" | "decimal-pad"; maxLength?: number;
+}): JSX.Element {
+  const { colors } = useTheme();
+  return (
+    <TextInput
+      value={value}
+      onChangeText={onChangeText}
+      keyboardType={keyboardType}
+      placeholder={placeholder}
+      placeholderTextColor={colors.textMuted}
+      maxLength={maxLength}
+      style={{
+        flex: 1,
+        borderRadius: 12, borderWidth: 1, borderColor: colors.border,
+        backgroundColor: colors.cardMuted,
+        paddingHorizontal: 14, paddingVertical: 11,
+        color: colors.text, fontSize: 15
+      }}
+    />
+  );
+}
+
+export function LogScreen(): JSX.Element {
+  const todayRecord       = useHealthStore((s) => s.todayRecord);
+  const activeMetrics     = useHealthStore((s) => s.activeMetrics);
+  const reports           = useHealthStore((s) => s.reports);
+  const aiPersonalization = useHealthStore((s) => s.aiPersonalization);
+  const isAnalyzingAi     = useHealthStore((s) => s.isAnalyzingAi);
+  const aiError           = useHealthStore((s) => s.aiError);
+  const watchData         = useHealthStore((s) => s.watchData);
+  const clearAiError      = useHealthStore((s) => s.clearAiError);
+  const runAiPersonalization = useHealthStore((s) => s.runAiPersonalization);
+  const addReport         = useHealthStore((s) => s.addReport);
+  const removeReport      = useHealthStore((s) => s.removeReport);
+  const addWater          = useHealthStore((s) => s.addWater);
+  const setSteps          = useHealthStore((s) => s.setSteps);
+  const setSleep          = useHealthStore((s) => s.setSleep);
+  const setWeight         = useHealthStore((s) => s.setWeight);
+  const setBloodPressure  = useHealthStore((s) => s.setBloodPressure);
+  const setHeartRate      = useHealthStore((s) => s.setHeartRate);
+  const setBloodSugar     = useHealthStore((s) => s.setBloodSugar);
+  const syncWatchData     = useHealthStore((s) => s.syncWatchData);
+  const resetToday        = useHealthStore((s) => s.resetToday);
+
+  const { colors } = useTheme();
+
+  const [customWater, setCustomWater]     = useState("");
+  const [stepsInput, setStepsInput]       = useState("");
+  const [sleepInput, setSleepInput]       = useState("");
+  const [weightInput, setWeightInput]     = useState("");
+  const [bpSysInput, setBpSysInput]       = useState("");
+  const [bpDiaInput, setBpDiaInput]       = useState("");
   const [heartRateInput, setHeartRateInput] = useState("");
   const [bloodSugarInput, setBloodSugarInput] = useState("");
   const [uploadingType, setUploadingType] = useState<ReportType | null>(null);
   const [analysisStepIndex, setAnalysisStepIndex] = useState(0);
+  const [isSyncingWatch, setIsSyncingWatch] = useState(false);
+  const [watchAvailable, setWatchAvailable] = useState(false);
 
-  const shouldTrackCalories = useMemo(
-    () => activeMetrics.includes("calories"),
-    [activeMetrics]
-  );
   const shouldTrackWeight = useMemo(() => activeMetrics.includes("weight"), [activeMetrics]);
-  const shouldTrackBp = useMemo(() => activeMetrics.includes("blood_pressure_sys") || activeMetrics.includes("blood_pressure_dia"), [activeMetrics]);
-  const shouldTrackHr = useMemo(() => activeMetrics.includes("heart_rate"), [activeMetrics]);
-  const shouldTrackSugar = useMemo(() => activeMetrics.includes("blood_sugar"), [activeMetrics]);
+  const shouldTrackBp     = useMemo(() => activeMetrics.includes("blood_pressure_sys"), [activeMetrics]);
+  const shouldTrackHr     = useMemo(() => activeMetrics.includes("heart_rate"), [activeMetrics]);
+  const shouldTrackSugar  = useMemo(() => activeMetrics.includes("blood_sugar"), [activeMetrics]);
+
   const waterGoal = useMemo(() => {
-    const target = aiPersonalization?.metric_targets?.water;
-    if (typeof target === "number" && Number.isFinite(target) && target > 0) {
-      return Math.round(target);
-    }
-    return WATER_GOAL_ML;
+    const t = aiPersonalization?.metric_targets?.water;
+    return typeof t === "number" && t > 0 ? Math.round(t) : WATER_GOAL_ML;
   }, [aiPersonalization?.metric_targets?.water]);
 
+  // Today's meal plan template
+  const todayMealTemplate = useMemo(() => {
+    const meals = aiPersonalization?.meal_plan;
+    if (!meals?.length) return null;
+    return meals.find((t) => t.label.toLowerCase().includes("regular")) ?? meals[0];
+  }, [aiPersonalization?.meal_plan]);
+
   useEffect(() => {
-    if (!todayRecord) {
-      return;
-    }
+    if (!todayRecord) return;
     setStepsInput(String(todayRecord.steps || ""));
     setSleepInput(todayRecord.sleep_hours ? String(todayRecord.sleep_hours) : "");
-    setCaloriesInput(String(todayRecord.calories || ""));
     setWeightInput(todayRecord.weight_kg ? String(todayRecord.weight_kg) : "");
-    setFoodIntakeInput(todayRecord.food_intake || "");
     setBpSysInput(todayRecord.blood_pressure_sys ? String(todayRecord.blood_pressure_sys) : "");
     setBpDiaInput(todayRecord.blood_pressure_dia ? String(todayRecord.blood_pressure_dia) : "");
     setHeartRateInput(todayRecord.heart_rate ? String(todayRecord.heart_rate) : "");
@@ -132,35 +179,26 @@ export function LogScreen(): JSX.Element {
   }, [todayRecord]);
 
   useEffect(() => {
-    if (!isAnalyzingAi) {
-      setAnalysisStepIndex(0);
-      return;
-    }
-
+    if (!isAnalyzingAi) { setAnalysisStepIndex(0); return; }
     const timer = setInterval(() => {
-      setAnalysisStepIndex((current) => (current + 1) % AI_ANALYSIS_PROGRESS_STEPS.length);
+      setAnalysisStepIndex((c) => (c + 1) % AI_ANALYSIS_PROGRESS_STEPS.length);
     }, 1500);
-
     return () => clearInterval(timer);
   }, [isAnalyzingAi]);
 
-  if (!todayRecord) {
-    return <View className="flex-1" />;
-  }
+  // Check if Samsung Health Connect is available
+  useEffect(() => {
+    isHealthConnectAvailable().then(setWatchAvailable).catch(() => {});
+  }, []);
+
+  if (!todayRecord) return <View style={{ flex: 1 }} />;
 
   async function onUploadReport(type: ReportType): Promise<void> {
     try {
       setUploadingType(type);
       const picked = await pickAndStoreReportFile();
-      if (!picked) {
-        return;
-      }
-      await addReport({
-        file_url: picked.fileUrl,
-        file_name: picked.fileName,
-        type,
-        date: getTodayDateKey()
-      });
+      if (!picked) return;
+      await addReport({ file_url: picked.fileUrl, file_name: picked.fileName, type, date: getTodayDateKey() });
     } finally {
       setUploadingType(null);
     }
@@ -168,48 +206,25 @@ export function LogScreen(): JSX.Element {
 
   async function onAddCustomWater(): Promise<void> {
     const parsed = Number(customWater);
-    if (!Number.isFinite(parsed) || parsed <= 0) {
-      return;
-    }
+    if (!Number.isFinite(parsed) || parsed <= 0) return;
     await addWater(parsed);
     setCustomWater("");
   }
 
-  async function onSaveSteps(): Promise<void> {
-    const parsed = Number(stepsInput);
-    if (!Number.isFinite(parsed) || parsed < 0) {
-      return;
-    }
-    await setSteps(parsed);
-  }
-
   async function onSaveSleep(): Promise<void> {
     const parsed = Number(sleepInput);
-    if (!Number.isFinite(parsed) || parsed < 0) {
-      return;
-    }
+    if (!Number.isFinite(parsed) || parsed < 0) return;
     await setSleep(parsed);
-  }
-
-  async function onSaveCalories(): Promise<void> {
-    const parsed = Number(caloriesInput);
-    if (!Number.isFinite(parsed) || parsed < 0) {
-      return;
-    }
-    await setCalories(parsed);
   }
 
   async function onSaveWeight(): Promise<void> {
     const parsed = Number(weightInput);
-    if (!Number.isFinite(parsed) || parsed < WEIGHT_MIN) {
-      return;
-    }
+    if (!Number.isFinite(parsed) || parsed < WEIGHT_MIN) return;
     await setWeight(parsed);
   }
 
   async function onSaveBloodPressure(): Promise<void> {
-    const sys = Number(bpSysInput);
-    const dia = Number(bpDiaInput);
+    const sys = Number(bpSysInput), dia = Number(bpDiaInput);
     if (!Number.isFinite(sys) || !Number.isFinite(dia)) return;
     if (sys < BP_SYS_MIN || sys > BP_SYS_MAX || dia < BP_DIA_MIN || dia > BP_DIA_MAX) return;
     await setBloodPressure(sys, dia);
@@ -227,340 +242,351 @@ export function LogScreen(): JSX.Element {
     await setBloodSugar(sugar);
   }
 
-  async function onSaveFoodIntake(): Promise<void> {
-    await setFoodIntake(foodIntakeInput);
-  }
-
-  async function onAnalyzeReports(): Promise<void> {
-    clearAiError();
-    await runAiPersonalization();
+  async function onSyncWatch(): Promise<void> {
+    setIsSyncingWatch(true);
+    try {
+      const data = await syncGalaxyWatch4();
+      if (data) {
+        await syncWatchData(data);
+        Alert.alert("Watch Synced", "Galaxy Watch 4 data has been synced to your dashboard.");
+      } else {
+        Alert.alert("Sync Failed", "Could not connect to Samsung Health. Make sure Health Connect is installed and Galaxy Watch 4 is connected.");
+      }
+    } finally {
+      setIsSyncingWatch(false);
+    }
   }
 
   return (
     <ScrollView
-      className="flex-1"
-      contentContainerStyle={{ paddingBottom: 122, gap: 14 }}
+      style={{ flex: 1 }}
+      contentContainerStyle={{ paddingBottom: 122, gap: 12 }}
       showsVerticalScrollIndicator={false}
     >
-      <Text className="text-white text-2xl font-bold mt-2">Daily Tracking</Text>
-      <Text className="text-textMuted text-sm">
-        Inputs are personalized based on your goals and conditions.
-      </Text>
+      <Animated.View entering={FadeInDown.duration(300)}>
+        <Text style={{ color: colors.text, fontSize: 22, fontWeight: "900", marginTop: 4 }}>Daily Tracking</Text>
+        <Text style={{ color: colors.textMuted, fontSize: 12, marginTop: 3 }}>
+          Personalized for your goals and medical profile.
+        </Text>
+      </Animated.View>
 
-      <View className="rounded-2xl border border-white/10 bg-card/80 p-4">
-        <Text className="text-white text-lg font-semibold">Water</Text>
-        <Text className="text-textMuted text-sm mt-1">Goal: {waterGoal}ml per day</Text>
-        <View className="mt-4">
-          <ProgressBar label="Hydration" value={todayRecord.water_ml} goal={waterGoal} />
-        </View>
-
-        <View className="mt-4 flex-row" style={{ gap: 10 }}>
-          <ScaleButton label="+250ml" onPress={() => addWater(250)} />
-          <ScaleButton label="+500ml" onPress={() => addWater(500)} />
-        </View>
-
-        <View className="mt-4 flex-row items-center" style={{ gap: 10 }}>
-          <TextInput
-            value={customWater}
-            onChangeText={setCustomWater}
-            keyboardType="numeric"
-            placeholder="Custom ml"
-            placeholderTextColor="#777792"
-            maxLength={String(MAX_WATER_ML_ENTRY).length}
-            className="flex-1 rounded-2xl border border-white/10 bg-cardMuted px-4 py-3 text-white"
-          />
-          <ScaleButton label="Add" onPress={onAddCustomWater} />
-        </View>
-
-        <View className="mt-3">
-          <ScaleButton label="Reset Today" onPress={resetToday} variant="secondary" />
-        </View>
-      </View>
-
-      <View className="rounded-2xl border border-white/10 bg-card/80 p-4">
-        <Text className="text-white text-lg font-semibold">Steps</Text>
-        <Text className="text-textMuted text-sm mt-1">Max entry {MAX_STEPS_ENTRY}.</Text>
-        <View className="mt-3 flex-row items-center" style={{ gap: 10 }}>
-          <TextInput
-            value={stepsInput}
-            onChangeText={setStepsInput}
-            keyboardType="numeric"
-            placeholder="Enter steps"
-            placeholderTextColor="#777792"
-            maxLength={String(MAX_STEPS_ENTRY).length}
-            className="flex-1 rounded-2xl border border-white/10 bg-cardMuted px-4 py-3 text-white"
-          />
-          <ScaleButton label="Save" onPress={onSaveSteps} />
-        </View>
-      </View>
-
-      <View className="rounded-2xl border border-white/10 bg-card/80 p-4">
-        <Text className="text-white text-lg font-semibold">Sleep</Text>
-        <Text className="text-textMuted text-sm mt-1">Max {MAX_SLEEP_HOURS_ENTRY} hrs.</Text>
-        <View className="mt-3 flex-row items-center" style={{ gap: 10 }}>
-          <TextInput
-            value={sleepInput}
-            onChangeText={setSleepInput}
-            keyboardType="decimal-pad"
-            placeholder="e.g. 7.5"
-            placeholderTextColor="#777792"
-            maxLength={4}
-            className="flex-1 rounded-2xl border border-white/10 bg-cardMuted px-4 py-3 text-white"
-          />
-          <ScaleButton label="Save" onPress={onSaveSleep} />
-        </View>
-      </View>
-
-      {shouldTrackCalories && (
-        <>
-          <View className="rounded-2xl border border-white/10 bg-card/80 p-4">
-            <Text className="text-white text-lg font-semibold">Calories</Text>
-            <Text className="text-textMuted text-sm mt-1">
-              Track intake for your active profile. Max {MAX_CALORIES_ENTRY} kcal.
-            </Text>
-            <View className="mt-3 flex-row items-center" style={{ gap: 10 }}>
-              <TextInput
-                value={caloriesInput}
-                onChangeText={setCaloriesInput}
-                keyboardType="numeric"
-                placeholder="Enter calories"
-                placeholderTextColor="#777792"
-                maxLength={String(MAX_CALORIES_ENTRY).length}
-                className="flex-1 rounded-2xl border border-white/10 bg-cardMuted px-4 py-3 text-white"
-              />
-              <ScaleButton label="Save" onPress={onSaveCalories} />
+      {/* ── Samsung Watch Sync ──────────────────────────────────────────── */}
+      <Animated.View entering={FadeInDown.delay(60).duration(300)}>
+        <LinearGradient
+          colors={["rgba(26,229,167,0.12)", "rgba(26,229,167,0.04)"]}
+          start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+          style={{
+            borderRadius: 20, borderWidth: 1,
+            borderColor: "rgba(26,229,167,0.25)", padding: 14
+          }}
+        >
+          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 10, flex: 1 }}>
+              <View style={{
+                backgroundColor: "rgba(26,229,167,0.18)", borderRadius: 12,
+                width: 42, height: 42, alignItems: "center", justifyContent: "center"
+              }}>
+                <MaterialCommunityIcons name="watch" size={20} color="#1AE5A7" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: colors.text, fontSize: 13, fontWeight: "700" }}>
+                  Galaxy Watch 4
+                </Text>
+                <Text style={{ color: colors.textMuted, fontSize: 11, marginTop: 2 }}>
+                  {watchData?.last_synced
+                    ? `Last synced: ${new Date(watchData.last_synced).toLocaleTimeString()}`
+                    : watchAvailable ? "Health Connect available" : "Android Health Connect required"}
+                </Text>
+              </View>
             </View>
+            <Pressable
+              onPress={() => { void onSyncWatch(); }}
+              disabled={isSyncingWatch}
+              style={{
+                backgroundColor: "#1AE5A7",
+                borderRadius: 12, paddingHorizontal: 14, paddingVertical: 9,
+                opacity: isSyncingWatch ? 0.6 : 1
+              }}
+            >
+              {isSyncingWatch
+                ? <ActivityIndicator size="small" color="#000" />
+                : <Text style={{ color: "#000", fontSize: 12, fontWeight: "700" }}>Sync</Text>}
+            </Pressable>
           </View>
 
-          <View className="rounded-2xl border border-white/10 bg-card/80 p-4">
-            <Text className="text-white text-lg font-semibold">Food Intake</Text>
-            <Text className="text-textMuted text-sm mt-1">
-              Keep meal notes. Max {MAX_FOOD_INTAKE_LENGTH} characters.
-            </Text>
-            <View className="mt-3">
-              <TextInput
-                value={foodIntakeInput}
-                onChangeText={setFoodIntakeInput}
-                placeholder="Example: oats + eggs, grilled chicken + rice..."
-                placeholderTextColor="#777792"
-                multiline
-                maxLength={MAX_FOOD_INTAKE_LENGTH}
-                style={{ textAlignVertical: "top", minHeight: 96 }}
-                className="rounded-2xl border border-white/10 bg-cardMuted px-4 py-3 text-white"
-              />
-            </View>
-            <View className="mt-2 flex-row justify-between items-center">
-              <Text className="text-textMuted text-xs">
-                {foodIntakeInput.length}/{MAX_FOOD_INTAKE_LENGTH}
-              </Text>
-              <ScaleButton label="Save Food Log" onPress={onSaveFoodIntake} />
-            </View>
-          </View>
-        </>
-      )}
-
-      {shouldTrackWeight && (
-        <View className="rounded-2xl border border-white/10 bg-card/80 p-4">
-          <Text className="text-white text-lg font-semibold">Weight</Text>
-          <Text className="text-textMuted text-sm mt-1">
-            Track body weight for goal progress. Max {MAX_WEIGHT_ENTRY} kg.
-          </Text>
-          <View className="mt-3 flex-row items-center" style={{ gap: 10 }}>
-            <TextInput
-              value={weightInput}
-              onChangeText={setWeightInput}
-              keyboardType="decimal-pad"
-              placeholder="Enter weight"
-              placeholderTextColor="#777792"
-              maxLength={5}
-              className="flex-1 rounded-2xl border border-white/10 bg-cardMuted px-4 py-3 text-white"
-            />
-            <ScaleButton label="Save" onPress={onSaveWeight} />
-          </View>
-        </View>
-      )}
-
-      {shouldTrackBp && (
-        <View className="rounded-2xl border border-white/10 bg-card/80 p-4">
-          <Text className="text-white text-lg font-semibold">Blood Pressure</Text>
-          <Text className="text-textMuted text-sm mt-1">
-            Track systolic and diastolic pressure (mmHg).
-          </Text>
-          <View className="mt-3 flex-row items-center" style={{ gap: 10 }}>
-            <TextInput
-              value={bpSysInput}
-              onChangeText={setBpSysInput}
-              keyboardType="numeric"
-              placeholder="Sys"
-              placeholderTextColor="#777792"
-              maxLength={3}
-              className="flex-1 rounded-2xl border border-white/10 bg-cardMuted px-4 py-3 text-white"
-            />
-            <Text className="text-textMuted text-lg">/</Text>
-            <TextInput
-              value={bpDiaInput}
-              onChangeText={setBpDiaInput}
-              keyboardType="numeric"
-              placeholder="Dia"
-              placeholderTextColor="#777792"
-              maxLength={3}
-              className="flex-1 rounded-2xl border border-white/10 bg-cardMuted px-4 py-3 text-white"
-            />
-            <ScaleButton label="Save" onPress={onSaveBloodPressure} />
-          </View>
-        </View>
-      )}
-
-      {shouldTrackHr && (
-        <View className="rounded-2xl border border-white/10 bg-card/80 p-4">
-          <Text className="text-white text-lg font-semibold">Heart Rate</Text>
-          <Text className="text-textMuted text-sm mt-1">Track resting heart rate (bpm).</Text>
-          <View className="mt-3 flex-row items-center" style={{ gap: 10 }}>
-            <TextInput
-              value={heartRateInput}
-              onChangeText={setHeartRateInput}
-              keyboardType="numeric"
-              placeholder="Enter BPM"
-              placeholderTextColor="#777792"
-              maxLength={3}
-              className="flex-1 rounded-2xl border border-white/10 bg-cardMuted px-4 py-3 text-white"
-            />
-            <ScaleButton label="Save" onPress={onSaveHeartRate} />
-          </View>
-        </View>
-      )}
-
-      {shouldTrackSugar && (
-        <View className="rounded-2xl border border-white/10 bg-card/80 p-4">
-          <Text className="text-white text-lg font-semibold">Fasting Blood Sugar</Text>
-          <Text className="text-textMuted text-sm mt-1">Track glycemic control (mg/dL).</Text>
-          <View className="mt-3 flex-row items-center" style={{ gap: 10 }}>
-            <TextInput
-              value={bloodSugarInput}
-              onChangeText={setBloodSugarInput}
-              keyboardType="numeric"
-              placeholder="Enter mg/dL"
-              placeholderTextColor="#777792"
-              maxLength={3}
-              className="flex-1 rounded-2xl border border-white/10 bg-cardMuted px-4 py-3 text-white"
-            />
-            <ScaleButton label="Save" onPress={onSaveBloodSugar} />
-          </View>
-        </View>
-      )}
-
-      <View className="rounded-2xl border border-white/10 bg-card/80 p-4">
-        <Text className="text-white text-lg font-semibold">Health Reports</Text>
-        <Text className="text-textMuted text-sm mt-1">Upload and tag reports for monitoring context.</Text>
-
-        <View className="mt-3 flex-row" style={{ gap: 10 }}>
-          <Pressable
-            onPress={() => onUploadReport("blood_test")}
-            className="flex-1 rounded-xl border border-white/10 bg-cardMuted px-3 py-3 items-center"
-          >
-            {uploadingType === "blood_test" ? (
-              <ActivityIndicator color="#4F7BFF" />
-            ) : (
-              <>
-                <MaterialCommunityIcons name="test-tube" size={18} color="#4F7BFF" />
-                <Text className="text-white text-sm mt-1">Blood Test</Text>
-              </>
-            )}
-          </Pressable>
-
-          <Pressable
-            onPress={() => onUploadReport("prescription")}
-            className="flex-1 rounded-xl border border-white/10 bg-cardMuted px-3 py-3 items-center"
-          >
-            {uploadingType === "prescription" ? (
-              <ActivityIndicator color="#9A6CFF" />
-            ) : (
-              <>
-                <MaterialCommunityIcons name="file-document-outline" size={18} color="#9A6CFF" />
-                <Text className="text-white text-sm mt-1">Prescription</Text>
-              </>
-            )}
-          </Pressable>
-        </View>
-
-        {!!reports.length && (
-          <View className="mt-4" style={{ gap: 8 }}>
-            {reports.slice(0, 4).map((report) => (
-              <View
-                key={report.id}
-                className="rounded-xl border border-white/10 bg-cardMuted/70 p-3 flex-row justify-between items-center"
-              >
-                <View className="flex-1 mr-2">
-                  <Text className="text-white" numberOfLines={1}>
-                    {report.file_name}
-                  </Text>
-                  <Text className="text-textMuted text-xs mt-0.5">
-                    {report.type.replace("_", " ")}
-                  </Text>
+          {/* Watch data pills */}
+          {watchData && (
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 10 }}>
+              {watchData.steps !== undefined && (
+                <View style={{ backgroundColor: colors.cardMuted, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 5, flexDirection: "row", alignItems: "center", gap: 4 }}>
+                  <MaterialCommunityIcons name="shoe-print" size={11} color="#4F7BFF" />
+                  <Text style={{ color: colors.text, fontSize: 11, fontWeight: "600" }}>{watchData.steps.toLocaleString()}</Text>
                 </View>
-                <Pressable
-                  onPress={() => {
-                    void removeReport(report.id);
-                  }}
-                  className="p-2"
-                >
-                  <MaterialCommunityIcons name="trash-can-outline" size={20} color="#FF6C6C" />
-                </Pressable>
-              </View>
-            ))}
-          </View>
-        )}
+              )}
+              {watchData.heart_rate !== undefined && (
+                <View style={{ backgroundColor: colors.cardMuted, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 5, flexDirection: "row", alignItems: "center", gap: 4 }}>
+                  <MaterialCommunityIcons name="heart-pulse" size={11} color="#EF476F" />
+                  <Text style={{ color: colors.text, fontSize: 11, fontWeight: "600" }}>{watchData.heart_rate} bpm</Text>
+                </View>
+              )}
+              {watchData.spo2 !== undefined && (
+                <View style={{ backgroundColor: colors.cardMuted, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 5, flexDirection: "row", alignItems: "center", gap: 4 }}>
+                  <MaterialCommunityIcons name="water-circle" size={11} color="#06D6A0" />
+                  <Text style={{ color: colors.text, fontSize: 11, fontWeight: "600" }}>{watchData.spo2.toFixed(1)}% SpO₂</Text>
+                </View>
+              )}
+              {watchData.sleep_hours !== undefined && (
+                <View style={{ backgroundColor: colors.cardMuted, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 5, flexDirection: "row", alignItems: "center", gap: 4 }}>
+                  <MaterialCommunityIcons name="power-sleep" size={11} color="#9A6CFF" />
+                  <Text style={{ color: colors.text, fontSize: 11, fontWeight: "600" }}>{watchData.sleep_hours.toFixed(1)}h sleep</Text>
+                </View>
+              )}
+            </View>
+          )}
+        </LinearGradient>
+      </Animated.View>
 
-        <View className="mt-4" style={{ gap: 10 }}>
-          <ScaleButton
-            label={isAnalyzingAi ? "Analyzing Reports..." : "Analyze Reports with AI"}
-            onPress={() => {
-              void onAnalyzeReports();
-            }}
-            variant="primary"
-          />
-
-          {isAnalyzingAi ? (
-            <View className="rounded-xl border border-accentBlue/30 bg-accentBlue/10 px-3 py-3">
-              <Text className="text-white text-sm font-semibold">AI Personalization Running</Text>
-              <Text className="text-textMuted text-sm mt-1">
-                {AI_ANALYSIS_PROGRESS_STEPS[analysisStepIndex]}...
+      {/* ── Today's Meal Plan ───────────────────────────────────────────── */}
+      {todayMealTemplate ? (
+        <Animated.View entering={FadeInDown.delay(80).duration(300)}>
+          <MealTracker template={todayMealTemplate} />
+        </Animated.View>
+      ) : (
+        <Animated.View entering={FadeInDown.delay(80).duration(300)}>
+          <View style={{
+            backgroundColor: colors.card, borderRadius: 20,
+            borderWidth: 1, borderColor: colors.border, padding: 16
+          }}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 8 }}>
+              <MaterialCommunityIcons name="food-apple-outline" size={16} color="#1AE5A7" />
+              <Text style={{ color: "#1AE5A7", fontSize: 10, fontWeight: "700", letterSpacing: 1.5 }}>
+                MEAL PLAN
               </Text>
-              <View className="mt-3 flex-row" style={{ gap: 6 }}>
-                {AI_ANALYSIS_PROGRESS_STEPS.map((step, index) => (
-                  <View
-                    key={step}
-                    className={`h-1.5 flex-1 rounded-full ${
-                      index <= analysisStepIndex ? "bg-accentBlue" : "bg-cardMuted"
-                    }`}
-                  />
-                ))}
-              </View>
             </View>
-          ) : null}
-
-          {aiError ? (
-            <View className="rounded-xl border border-red-400/25 bg-red-400/10 px-3 py-3">
-              <Text className="text-red-200 text-sm">{aiError}</Text>
-              <View className="mt-3">
-                <ScaleButton
-                  label="Retry AI Analysis"
-                  onPress={() => {
-                    void onAnalyzeReports();
-                  }}
-                  variant="secondary"
-                />
-              </View>
-            </View>
-          ) : null}
-
-          {aiPersonalization ? (
-            <Text className="text-textMuted text-xs">
-              Last personalized {new Date(aiPersonalization.generated_at).toLocaleString()}.
+            <Text style={{ color: colors.textMuted, fontSize: 12, lineHeight: 18 }}>
+              Upload a lab report (blood test) and run AI Analysis to get your personalized meal plan. Upload a doctor's prescription to extract your supplements in the Meds tab.
             </Text>
-          ) : null}
-        </View>
-      </View>
+          </View>
+        </Animated.View>
+      )}
+
+      {/* ── Water ───────────────────────────────────────────────────────── */}
+      <Animated.View entering={FadeInDown.delay(100).duration(300)}>
+        <SectionCard title="Hydration" subtitle={`Goal: ${waterGoal}ml per day`} icon="water" accentColor="#1AE5A7">
+          <ProgressBar label="Water" value={todayRecord.water_ml} goal={waterGoal} />
+          <View style={{ flexDirection: "row", gap: 8, marginTop: 12 }}>
+            <ScaleButton label="+250ml" onPress={() => addWater(250)} color="#1AE5A7" />
+            <ScaleButton label="+500ml" onPress={() => addWater(500)} color="#1AE5A7" />
+            <ScaleButton label="+1L" onPress={() => addWater(1000)} color="#1AE5A7" />
+          </View>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: 10 }}>
+            <MetricInput
+              value={customWater}
+              onChangeText={setCustomWater}
+              placeholder="Custom ml"
+              maxLength={String(MAX_WATER_ML_ENTRY).length}
+            />
+            <ScaleButton label="Add" onPress={onAddCustomWater} color="#1AE5A7" />
+          </View>
+          <View style={{ marginTop: 8 }}>
+            <ScaleButton label="Reset Today" onPress={resetToday} variant="secondary" />
+          </View>
+        </SectionCard>
+      </Animated.View>
+
+      {/* ── Sleep ───────────────────────────────────────────────────────── */}
+      <Animated.View entering={FadeInDown.delay(120).duration(300)}>
+        <SectionCard title="Sleep" subtitle={`Max ${MAX_SLEEP_HOURS_ENTRY} hrs`} icon="power-sleep" accentColor="#9A6CFF">
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+            <MetricInput
+              value={sleepInput}
+              onChangeText={setSleepInput}
+              keyboardType="decimal-pad"
+              placeholder="e.g. 7.5 hrs"
+              maxLength={4}
+            />
+            <ScaleButton label="Save" onPress={onSaveSleep} color="#9A6CFF" />
+          </View>
+        </SectionCard>
+      </Animated.View>
+
+      {/* ── Weight ──────────────────────────────────────────────────────── */}
+      {shouldTrackWeight && (
+        <Animated.View entering={FadeInDown.delay(140).duration(300)}>
+          <SectionCard title="Weight" subtitle={`Goal-aware tracking. Max ${MAX_WEIGHT_ENTRY} kg.`} icon="scale-bathroom" accentColor="#FFD166">
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+              <MetricInput
+                value={weightInput}
+                onChangeText={setWeightInput}
+                keyboardType="decimal-pad"
+                placeholder="Enter weight (kg)"
+                maxLength={5}
+              />
+              <ScaleButton label="Save" onPress={onSaveWeight} color="#FFD166" />
+            </View>
+          </SectionCard>
+        </Animated.View>
+      )}
+
+      {/* ── Blood Pressure ──────────────────────────────────────────────── */}
+      {shouldTrackBp && (
+        <Animated.View entering={FadeInDown.delay(160).duration(300)}>
+          <SectionCard title="Blood Pressure" subtitle="Systolic / Diastolic (mmHg)" icon="heart-pulse" accentColor="#EF476F">
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+              <MetricInput value={bpSysInput} onChangeText={setBpSysInput} placeholder="Sys" maxLength={3} />
+              <Text style={{ color: colors.textMuted, fontSize: 18 }}>/</Text>
+              <MetricInput value={bpDiaInput} onChangeText={setBpDiaInput} placeholder="Dia" maxLength={3} />
+              <ScaleButton label="Save" onPress={onSaveBloodPressure} color="#EF476F" />
+            </View>
+          </SectionCard>
+        </Animated.View>
+      )}
+
+      {/* ── Heart Rate ──────────────────────────────────────────────────── */}
+      {shouldTrackHr && (
+        <Animated.View entering={FadeInDown.delay(175).duration(300)}>
+          <SectionCard title="Heart Rate" subtitle="Resting heart rate (bpm)" icon="heart" accentColor="#EF476F">
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+              <MetricInput value={heartRateInput} onChangeText={setHeartRateInput} placeholder="BPM" maxLength={3} />
+              <ScaleButton label="Save" onPress={onSaveHeartRate} color="#EF476F" />
+            </View>
+          </SectionCard>
+        </Animated.View>
+      )}
+
+      {/* ── Blood Sugar ─────────────────────────────────────────────────── */}
+      {shouldTrackSugar && (
+        <Animated.View entering={FadeInDown.delay(190).duration(300)}>
+          <SectionCard title="Fasting Blood Sugar" subtitle="Glycemic control (mg/dL)" icon="water-outline" accentColor="#06D6A0">
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+              <MetricInput value={bloodSugarInput} onChangeText={setBloodSugarInput} placeholder="mg/dL" maxLength={3} />
+              <ScaleButton label="Save" onPress={onSaveBloodSugar} color="#06D6A0" />
+            </View>
+          </SectionCard>
+        </Animated.View>
+      )}
+
+      {/* ── Health Reports & AI Analysis ──────────────────────────────── */}
+      <Animated.View entering={FadeInDown.delay(210).duration(300)}>
+        <SectionCard
+          title="Health Reports"
+          subtitle="Blood tests drive your health plan · Doctor prescriptions extract supplements"
+          icon="file-document-outline"
+          accentColor="#4F7BFF"
+        >
+          <View style={{ flexDirection: "row", gap: 10 }}>
+            <Pressable
+              onPress={() => { void onUploadReport("blood_test"); }}
+              style={{
+                flex: 1, borderRadius: 14, borderWidth: 1, borderColor: colors.border,
+                backgroundColor: colors.cardMuted, padding: 14, alignItems: "center"
+              }}
+            >
+              {uploadingType === "blood_test"
+                ? <ActivityIndicator color="#4F7BFF" />
+                : <>
+                    <MaterialCommunityIcons name="test-tube" size={20} color="#4F7BFF" />
+                    <Text style={{ color: colors.text, fontSize: 12, marginTop: 6, fontWeight: "600" }}>Lab Report</Text>
+                    <Text style={{ color: colors.textMuted, fontSize: 10, marginTop: 2, textAlign: "center" }}>Blood Test / HbA1c</Text>
+                  </>}
+            </Pressable>
+
+            <Pressable
+              onPress={() => { void onUploadReport("prescription"); }}
+              style={{
+                flex: 1, borderRadius: 14, borderWidth: 1, borderColor: colors.border,
+                backgroundColor: colors.cardMuted, padding: 14, alignItems: "center"
+              }}
+            >
+              {uploadingType === "prescription"
+                ? <ActivityIndicator color="#9A6CFF" />
+                : <>
+                    <MaterialCommunityIcons name="pill" size={20} color="#9A6CFF" />
+                    <Text style={{ color: colors.text, fontSize: 12, marginTop: 6, fontWeight: "600" }}>Prescription</Text>
+                    <Text style={{ color: colors.textMuted, fontSize: 10, marginTop: 2, textAlign: "center" }}>Doctor's Rx / Meds</Text>
+                  </>}
+            </Pressable>
+          </View>
+
+          {reports.length > 0 && (
+            <View style={{ marginTop: 12, gap: 8 }}>
+              {reports.slice(0, 4).map((report) => (
+                <View key={report.id} style={{
+                  flexDirection: "row", alignItems: "center",
+                  backgroundColor: colors.cardMuted, borderRadius: 12,
+                  paddingHorizontal: 12, paddingVertical: 10
+                }}>
+                  <MaterialCommunityIcons
+                    name={report.type === "blood_test" ? "test-tube" : "pill"}
+                    size={16} color={report.type === "blood_test" ? "#4F7BFF" : "#9A6CFF"}
+                  />
+                  <View style={{ flex: 1, marginLeft: 10 }}>
+                    <Text style={{ color: colors.text, fontSize: 12, fontWeight: "600" }} numberOfLines={1}>
+                      {report.file_name}
+                    </Text>
+                    <Text style={{ color: colors.textMuted, fontSize: 10, marginTop: 2 }}>
+                      {report.type === "blood_test" ? "Lab Report" : "Doctor's Prescription"} · {report.date}
+                    </Text>
+                  </View>
+                  <Pressable onPress={() => { void removeReport(report.id); }} style={{ padding: 6 }}>
+                    <MaterialCommunityIcons name="trash-can-outline" size={18} color="#FF4158" />
+                  </Pressable>
+                </View>
+              ))}
+            </View>
+          )}
+
+          <View style={{ marginTop: 12, gap: 10 }}>
+            <ScaleButton
+              label={isAnalyzingAi ? "Analyzing..." : "Analyze Reports with AI"}
+              onPress={() => { clearAiError(); void runAiPersonalization(); }}
+            />
+
+            {isAnalyzingAi && (
+              <View style={{
+                borderRadius: 14, borderWidth: 1, borderColor: "rgba(79,123,255,0.30)",
+                backgroundColor: "rgba(79,123,255,0.08)", padding: 12
+              }}>
+                <Text style={{ color: colors.text, fontSize: 12, fontWeight: "700" }}>
+                  AI Personalization Running
+                </Text>
+                <Text style={{ color: colors.textMuted, fontSize: 11, marginTop: 4 }}>
+                  {AI_ANALYSIS_PROGRESS_STEPS[analysisStepIndex]}...
+                </Text>
+                <View style={{ flexDirection: "row", gap: 4, marginTop: 10 }}>
+                  {AI_ANALYSIS_PROGRESS_STEPS.map((_, index) => (
+                    <View
+                      key={index}
+                      style={{
+                        height: 3, flex: 1, borderRadius: 2,
+                        backgroundColor: index <= analysisStepIndex ? colors.accentBlue : colors.cardMuted
+                      }}
+                    />
+                  ))}
+                </View>
+              </View>
+            )}
+
+            {aiError && (
+              <View style={{
+                borderRadius: 14, borderWidth: 1, borderColor: "rgba(239,71,111,0.25)",
+                backgroundColor: "rgba(239,71,111,0.08)", padding: 12
+              }}>
+                <Text style={{ color: "#EF476F", fontSize: 12 }}>{aiError}</Text>
+                <View style={{ marginTop: 10 }}>
+                  <ScaleButton label="Retry" onPress={() => { clearAiError(); void runAiPersonalization(); }} variant="secondary" />
+                </View>
+              </View>
+            )}
+
+            {aiPersonalization && (
+              <Text style={{ color: colors.textMuted, fontSize: 10, textAlign: "center" }}>
+                Last analyzed: {new Date(aiPersonalization.generated_at).toLocaleString()}
+              </Text>
+            )}
+          </View>
+        </SectionCard>
+      </Animated.View>
     </ScrollView>
   );
 }

@@ -1,16 +1,17 @@
 /**
  * notificationService.ts
- * Handles push notification permissions and daily health reminder scheduling.
- * Uses expo-notifications with local triggers (no server required).
+ * Core push notification setup and health reminder scheduling.
+ * Meal-specific reminders are in mealReminderService.ts
+ * Weekly report notifications are in weeklyReportService.ts
  */
 import * as Notifications from "expo-notifications";
 import { Platform } from "react-native";
 
-// Configure how notifications look when the app is in the foreground.
+// Configure foreground notification display
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
     shouldShowAlert: true,
-    shouldPlaySound: false,
+    shouldPlaySound: true,
     shouldSetBadge: false
   })
 });
@@ -18,44 +19,35 @@ Notifications.setNotificationHandler({
 const CHANNEL_ID = "healthos-reminders";
 const WATER_NOTIFICATION_ID = "healthos-water-reminder";
 const LOG_NOTIFICATION_ID = "healthos-log-reminder";
+const SLEEP_NOTIFICATION_ID = "healthos-sleep-reminder";
 
 export type NotificationPermissionStatus = "granted" | "denied" | "undetermined";
 
-/**
- * Request push notification permissions from the OS.
- * Returns "granted" | "denied" | "undetermined".
- */
 export async function requestNotificationPermissions(): Promise<NotificationPermissionStatus> {
   if (Platform.OS === "android") {
     await Notifications.setNotificationChannelAsync(CHANNEL_ID, {
       name: "HealthOS Reminders",
-      importance: Notifications.AndroidImportance.DEFAULT,
-      vibrationPattern: [0, 250, 250, 250]
+      importance: Notifications.AndroidImportance.HIGH,
+      vibrationPattern: [0, 250, 250, 250],
+      sound: "default"
     });
   }
 
   const { status: existingStatus } = await Notifications.getPermissionsAsync();
-  if (existingStatus === "granted") {
-    return "granted";
-  }
+  if (existingStatus === "granted") return "granted";
 
   const { status } = await Notifications.requestPermissionsAsync();
   return status as NotificationPermissionStatus;
 }
 
-/**
- * Schedule a daily evening reminder to log water if not already met.
- * Fires every day at 20:00 local time.
- */
+/** Daily evening hydration reminder at 20:00 */
 export async function scheduleWaterReminder(): Promise<void> {
-  // Cancel any existing water reminder first to avoid duplicates.
   await Notifications.cancelScheduledNotificationAsync(WATER_NOTIFICATION_ID).catch(() => {});
-
   await Notifications.scheduleNotificationAsync({
     identifier: WATER_NOTIFICATION_ID,
     content: {
-      title: "💧 Stay Hydrated!",
-      body: "Have you hit your daily water goal? Log your intake now.",
+      title: "💧 Hydration Check",
+      body: "Have you hit your daily water goal? Keep it up!",
       data: { screen: "log" }
     },
     trigger: {
@@ -66,47 +58,61 @@ export async function scheduleWaterReminder(): Promise<void> {
   });
 }
 
-/**
- * Schedule a daily morning reminder to log daily metrics.
- * Fires every day at 09:00 local time.
- */
+/** Daily morning metric log reminder at 08:00 */
 export async function scheduleDailyLogReminder(): Promise<void> {
   await Notifications.cancelScheduledNotificationAsync(LOG_NOTIFICATION_ID).catch(() => {});
-
   await Notifications.scheduleNotificationAsync({
     identifier: LOG_NOTIFICATION_ID,
     content: {
-      title: "📋 Morning Health Check",
-      body: "Start your day right — log your weight, sleep, and steps.",
+      title: "📋 Morning Check-in",
+      body: "Log your weight, sleep, and steps to start your day strong.",
       data: { screen: "log" }
     },
     trigger: {
       type: Notifications.SchedulableTriggerInputTypes.DAILY,
-      hour: 9,
+      hour: 8,
       minute: 0
     }
   });
 }
 
-/**
- * Cancel all HealthOS scheduled notifications.
- */
+/** Bedtime reminder at 22:30 */
+export async function scheduleSleepReminder(): Promise<void> {
+  await Notifications.cancelScheduledNotificationAsync(SLEEP_NOTIFICATION_ID).catch(() => {});
+  await Notifications.scheduleNotificationAsync({
+    identifier: SLEEP_NOTIFICATION_ID,
+    content: {
+      title: "🌙 Wind Down Time",
+      body: "Aiming for your sleep target? Start your wind-down routine.",
+      data: { screen: "home" }
+    },
+    trigger: {
+      type: Notifications.SchedulableTriggerInputTypes.DAILY,
+      hour: 22,
+      minute: 30
+    }
+  });
+}
+
 export async function cancelAllReminders(): Promise<void> {
   await Notifications.cancelAllScheduledNotificationsAsync();
 }
 
 /**
- * Set up both reminders after permissions are granted.
+ * Set up core daily reminders: morning log, evening water, bedtime.
+ * Returns true if permissions were granted.
  */
 export async function setupHealthReminders(): Promise<boolean> {
   try {
     const status = await requestNotificationPermissions();
-    if (status !== "granted") {
-      return false;
-    }
-    await Promise.all([scheduleWaterReminder(), scheduleDailyLogReminder()]);
+    if (status !== "granted") return false;
+    await Promise.all([
+      scheduleWaterReminder(),
+      scheduleDailyLogReminder(),
+      scheduleSleepReminder()
+    ]);
     return true;
-  } catch (_error) {
+  } catch {
     return false;
   }
 }
