@@ -5,3 +5,11 @@ web-build
 npm-debug.*
 *.log
 .env
+.env.local
+.env.*.local
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.orig.*

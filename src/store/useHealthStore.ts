@@ -444,7 +444,7 @@ export const useHealthStore = create<HealthStore>((set, get) => ({
     const { todayRecord, profile } = get();
     if (!todayRecord || !profile) return;
 
-    const nextSugar = Math.round(clampNumber(mgdl, 0, SUGAR_MAX));
+    const nextSugar = Math.round(clampNumber(mgdl, SUGAR_MIN, SUGAR_MAX));
     const optimistic = { ...todayRecord, blood_sugar: nextSugar };
     set({ todayRecord: optimistic });
 
@@ -568,7 +568,7 @@ export const useHealthStore = create<HealthStore>((set, get) => ({
 
 function deriveWeeklyTargets(
   base: MetricTargets,
-  profile: UserProfile
+  _profile: UserProfile
 ): MetricTargets {
   const weekly: MetricTargets = { ...base };
   // For week 1, set slightly progressive targets (5–10% increase toward goal)
@@ -580,7 +580,7 @@ function deriveWeeklyTargets(
 
 function deriveMonthlyTargets(
   base: MetricTargets,
-  profile: UserProfile
+  _profile: UserProfile
 ): MetricTargets {
   const monthly: MetricTargets = { ...base };
   // Monthly targets are the full AI-recommended targets (not incremental)
