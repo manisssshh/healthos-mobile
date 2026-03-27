@@ -30,7 +30,6 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#060608"
       },
-      "minSdkVersion": 26,
       "permissions": [
         "android.permission.health.READ_STEPS",
         "android.permission.health.READ_HEART_RATE",
@@ -71,8 +70,9 @@
     ],
     "extra": {
       "eas": {
-        "projectId": "c51fb951-40e6-4154-a0eb-7681395cbb6a"
+        "projectId": "f227ed4a-761b-4e43-b911-df8370b5391e"
       }
-    }
+    },
+    "owner": "ken2407"
   }
 }

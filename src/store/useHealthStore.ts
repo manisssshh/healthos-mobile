@@ -270,7 +270,12 @@ export const useHealthStore = create<HealthStore>((set, get) => ({
     await addHealthReport(payload);
     const updated = await getHealthReports();
     set({ reports: updated });
+    // Blood test → re-run AI health plan
     void get().runAiPersonalization();
+    // Doctor's prescription → auto-extract supplements + doctor notes
+    if (payload.type === "prescription") {
+      void get().analyzeDocPrescriptions();
+    }
   },
 
   removeReport: async (id: number) => {

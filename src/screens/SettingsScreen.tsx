@@ -226,6 +226,9 @@ export function SettingsScreen({ onClose }: SettingsScreenProps): JSX.Element {
       } else {
         Alert.alert("Sync Failed", "Could not read watch data. Check permissions in Health Connect settings.");
       }
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : "An unexpected error occurred during sync.";
+      Alert.alert("Sync Error", msg);
     } finally {
       setWatchLoading(false);
     }

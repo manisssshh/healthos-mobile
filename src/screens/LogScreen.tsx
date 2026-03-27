@@ -199,6 +199,9 @@ export function LogScreen(): JSX.Element {
       const picked = await pickAndStoreReportFile();
       if (!picked) return;
       await addReport({ file_url: picked.fileUrl, file_name: picked.fileName, type, date: getTodayDateKey() });
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : "Could not upload the file. Please try again.";
+      Alert.alert("Upload Failed", msg);
     } finally {
       setUploadingType(null);
     }
@@ -250,8 +253,11 @@ export function LogScreen(): JSX.Element {
         await syncWatchData(data);
         Alert.alert("Watch Synced", "Galaxy Watch 4 data has been synced to your dashboard.");
       } else {
-        Alert.alert("Sync Failed", "Could not connect to Samsung Health. Make sure Health Connect is installed and Galaxy Watch 4 is connected.");
+        Alert.alert("Not Connected", "Could not connect to Samsung Health. Make sure the Health Connect app is installed and your Galaxy Watch 4 is paired.");
       }
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : "An unexpected error occurred during sync.";
+      Alert.alert("Sync Error", msg);
     } finally {
       setIsSyncingWatch(false);
     }
@@ -470,7 +476,7 @@ export function LogScreen(): JSX.Element {
       <Animated.View entering={FadeInDown.delay(210).duration(300)}>
         <SectionCard
           title="Health Reports"
-          subtitle="Blood tests drive your health plan · Doctor prescriptions extract supplements"
+          subtitle="Lab reports → AI health plan · Prescriptions → auto-extract supplements to Meds tab"
           icon="file-document-outline"
           accentColor="#4F7BFF"
         >
