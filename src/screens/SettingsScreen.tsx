@@ -82,6 +82,7 @@ export function SettingsScreen({ onClose }: SettingsScreenProps): JSX.Element {
   const [goal,   setGoal]   = useState<UserProfileInput["goal"]>(profile?.goal ?? "general_fitness");
   const [conditions, setConditions] = useState<HealthCondition[]>(profile?.conditions ?? []);
   const [isSaving,         setIsSaving]         = useState(false);
+  const [notifEnabled,      setNotifEnabled]      = useState(false);
   const [notifLoading,     setNotifLoading]      = useState(false);
   const [mealNotifLoading, setMealNotifLoading]  = useState(false);
   const [watchLoading,     setWatchLoading]      = useState(false);
@@ -129,6 +130,7 @@ export function SettingsScreen({ onClose }: SettingsScreenProps): JSX.Element {
       if (value) {
         const success = await setupHealthReminders();
         if (success) {
+          setNotifEnabled(true);
           Alert.alert("Reminders On", "Daily reminders set for 8 AM, 8 PM, and 10:30 PM.");
         } else {
           Alert.alert("Permission Denied", "Enable notifications in device settings.");
@@ -136,6 +138,7 @@ export function SettingsScreen({ onClose }: SettingsScreenProps): JSX.Element {
         }
       } else {
         await cancelAllReminders();
+        setNotifEnabled(false);
       }
     } finally {
       setNotifLoading(false);
@@ -401,7 +404,7 @@ export function SettingsScreen({ onClose }: SettingsScreenProps): JSX.Element {
           <SettingRow
             label="Health Reminders"
             description="8 AM morning log · 8 PM hydration · 10:30 PM sleep"
-            value={false}
+            value={notifEnabled}
             onValueChange={(v) => { void handleToggleReminders(v); }}
             disabled={notifLoading}
           />

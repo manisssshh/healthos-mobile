@@ -16,7 +16,7 @@ import { getMetricPresentationList } from "../services/metricService";
 import { subscribeToSteps } from "../services/pedometerService";
 import { WATCH_DATA_LABELS } from "../services/samsungHealthService";
 import type { DailyHealthRecord, HealthMetricKey, WatchData, WeeklyWorkoutPlan } from "../types/health";
-import { getPerformanceZone, getZoneColor, WATER_GOAL_ML, SLEEP_GOAL_HOURS, STEP_GOAL } from "../types/health";
+import { getZoneColor, getPerformanceZone, WATER_GOAL_ML, SLEEP_GOAL_HOURS, STEP_GOAL } from "../types/health";
 
 function metricValue(metric: HealthMetricKey, record: DailyHealthRecord): number {
   if (metric === "sleep") return record.sleep_hours;

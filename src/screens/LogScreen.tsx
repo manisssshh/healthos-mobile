@@ -209,7 +209,7 @@ export function LogScreen(): JSX.Element {
 
   async function onAddCustomWater(): Promise<void> {
     const parsed = Number(customWater);
-    if (!Number.isFinite(parsed) || parsed <= 0) return;
+    if (!Number.isFinite(parsed) || parsed <= 0 || parsed > MAX_WATER_ML_ENTRY) return;
     await addWater(parsed);
     setCustomWater("");
   }

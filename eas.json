@@ -6,16 +6,28 @@
   "build": {
     "development": {
       "developmentClient": true,
-      "distribution": "internal"
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_GEMINI_API_KEY": "$EXPO_PUBLIC_GEMINI_API_KEY"
+      }
     },
     "preview": {
       "distribution": "internal",
       "android": {
         "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_GEMINI_API_KEY": "$EXPO_PUBLIC_GEMINI_API_KEY"
       }
     },
     "production": {
-      "autoIncrement": true
+      "autoIncrement": true,
+      "android": {
+        "buildType": "aab"
+      },
+      "env": {
+        "EXPO_PUBLIC_GEMINI_API_KEY": "$EXPO_PUBLIC_GEMINI_API_KEY"
+      }
     }
   },
   "submit": {

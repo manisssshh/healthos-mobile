@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { Alert, ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import type { HealthCondition, ReportType, UserProfileInput } from "../types/health";
@@ -69,16 +69,15 @@ export function SetupScreen(): JSX.Element {
     try {
       setUploadingType(type);
       const picked = await pickAndStoreReportFile();
-      if (!picked) {
-        return;
-      }
-
+      if (!picked) return;
       await addReport({
         file_url: picked.fileUrl,
         file_name: picked.fileName,
         type,
         date: getTodayDateKey()
       });
+    } catch {
+      // silently ignore cancelled picker
     } finally {
       setUploadingType(null);
     }
@@ -90,18 +89,22 @@ export function SetupScreen(): JSX.Element {
     const parsedHeight = Number(height);
 
     if (!Number.isFinite(parsedAge) || !Number.isFinite(parsedWeight) || !Number.isFinite(parsedHeight)) {
+      Alert.alert("Invalid Input", "Please enter valid numbers for age, weight and height.");
       return;
     }
 
     if (parsedAge < AGE_MIN || parsedAge > AGE_MAX) {
+      Alert.alert("Invalid Age", `Age must be between ${AGE_MIN} and ${AGE_MAX}.`);
       return;
     }
 
     if (parsedWeight < WEIGHT_MIN || parsedWeight > WEIGHT_MAX) {
+      Alert.alert("Invalid Weight", `Weight must be between ${WEIGHT_MIN} and ${WEIGHT_MAX} kg.`);
       return;
     }
 
     if (parsedHeight < HEIGHT_MIN || parsedHeight > HEIGHT_MAX) {
+      Alert.alert("Invalid Height", `Height must be between ${HEIGHT_MIN} and ${HEIGHT_MAX} cm.`);
       return;
     }
 
