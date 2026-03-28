@@ -24,7 +24,7 @@ export function MetricCard({
 
   useEffect(() => {
     progress.value = withDelay(delay + 200, withTiming(progressPercent, { duration: 800 }));
-  }, [progressPercent, delay]);
+  }, [progressPercent, delay, progress]);
 
   const progressStyle = useAnimatedStyle(() => ({
     width: `${Math.round(progress.value * 100)}%` as `${number}%`,
