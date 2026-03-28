@@ -17,18 +17,6 @@ const WEEKLY_REPORT_CALENDAR_TITLE = "HealthOS Weekly Report";
 
 // ─── HTML Report Template ─────────────────────────────────────────────────────
 
-function buildProgressBar(value: number, goal: number, color: string): string {
-  const pct = Math.min(100, goal > 0 ? Math.round((value / goal) * 100) : 0);
-  return `
-    <div style="margin: 4px 0;">
-      <div style="background:#1A1A2A;border-radius:4px;height:8px;overflow:hidden;">
-        <div style="width:${pct}%;background:${color};height:100%;border-radius:4px;"></div>
-      </div>
-      <span style="font-size:10px;color:#7A7A95;">${pct}% of goal</span>
-    </div>
-  `;
-}
-
 function metricRow(
   label: string,
   avgValue: string,

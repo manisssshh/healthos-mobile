@@ -16,7 +16,7 @@ import { getMetricPresentationList } from "../services/metricService";
 import { subscribeToSteps } from "../services/pedometerService";
 import { WATCH_DATA_LABELS } from "../services/samsungHealthService";
 import type { DailyHealthRecord, HealthMetricKey, WatchData, WeeklyWorkoutPlan } from "../types/health";
-import { getZoneColor, getPerformanceZone, WATER_GOAL_ML, SLEEP_GOAL_HOURS, STEP_GOAL } from "../types/health";
+import { getZoneColor, WATER_GOAL_ML, SLEEP_GOAL_HOURS, STEP_GOAL } from "../types/health";
 
 function metricValue(metric: HealthMetricKey, record: DailyHealthRecord): number {
   if (metric === "sleep") return record.sleep_hours;
@@ -241,7 +241,6 @@ export function HomeScreen(): JSX.Element {
   const todayRecord   = useHealthStore((s) => s.todayRecord);
   const weeklyRecords = useHealthStore((s) => s.weeklyRecords);
   const activeMetrics = useHealthStore((s) => s.activeMetrics);
-  const reports       = useHealthStore((s) => s.reports);
   const aiPersonalization = useHealthStore((s) => s.aiPersonalization);
   const isAnalyzingAi = useHealthStore((s) => s.isAnalyzingAi);
   const watchData     = useHealthStore((s) => s.watchData);
@@ -417,9 +416,6 @@ export function HomeScreen(): JSX.Element {
               {row.map((metric, mi) => {
                 const val = metricValue(metric.key, todayRecord);
                 const displayVal = metricDisplayValue(metric.key, val);
-                const zone = getPerformanceZone(
-                  metric.goal > 0 ? Math.round(Math.min(100, (val / metric.goal) * 100)) : 0
-                );
                 const borderColor = val > 0 ? `${metric.color}40` : colors.border;
                 return (
                   <Animated.View

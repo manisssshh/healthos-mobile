@@ -216,13 +216,19 @@ export function LogScreen(): JSX.Element {
 
   async function onSaveSleep(): Promise<void> {
     const parsed = Number(sleepInput);
-    if (!Number.isFinite(parsed) || parsed < 0) return;
+    if (!Number.isFinite(parsed) || parsed < 0 || parsed > MAX_SLEEP_HOURS_ENTRY) {
+      Alert.alert("Invalid Sleep", `Enter a value between 0 and ${MAX_SLEEP_HOURS_ENTRY} hours.`);
+      return;
+    }
     await setSleep(parsed);
   }
 
   async function onSaveWeight(): Promise<void> {
     const parsed = Number(weightInput);
-    if (!Number.isFinite(parsed) || parsed < WEIGHT_MIN) return;
+    if (!Number.isFinite(parsed) || parsed < WEIGHT_MIN || parsed > MAX_WEIGHT_ENTRY) {
+      Alert.alert("Invalid Weight", `Enter a weight between ${WEIGHT_MIN} and ${MAX_WEIGHT_ENTRY} kg.`);
+      return;
+    }
     await setWeight(parsed);
   }
 

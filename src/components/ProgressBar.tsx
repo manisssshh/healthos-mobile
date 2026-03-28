@@ -14,7 +14,7 @@ type ProgressBarProps = {
 };
 
 export function ProgressBar({ label, value, goal }: ProgressBarProps): JSX.Element {
-  const progressRatio = Math.max(0, Math.min(value / goal, 1));
+  const progressRatio = goal > 0 ? Math.max(0, Math.min(value / goal, 1)) : 0;
   const [trackWidth, setTrackWidth] = useState(0);
   const animatedWidth = useSharedValue(0);
 

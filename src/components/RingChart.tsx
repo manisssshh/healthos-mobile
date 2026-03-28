@@ -65,7 +65,7 @@ export function RingChart({
   useEffect(() => {
     progress.value = withTiming(percent, { duration: 1000, easing: Easing.out(Easing.cubic) });
     scale.value = withSpring(1, { damping: 14, stiffness: 160 });
-  }, [percent]);
+  }, [percent, progress, scale]);
 
   const animatedCircleProps = useAnimatedProps(() => ({
     strokeDashoffset: circumference * (1 - progress.value)
@@ -177,7 +177,7 @@ export function HeroRing({ score }: HeroRingProps): JSX.Element {
   useEffect(() => {
     progress.value = withTiming(score / 100, { duration: 1100, easing: Easing.out(Easing.cubic) });
     scale.value = withSpring(1, { damping: 12, stiffness: 160 });
-  }, [score]);
+  }, [score, progress, scale]);
 
   const animatedCircleProps = useAnimatedProps(() => ({
     strokeDashoffset: HERO_CIRCUMFERENCE * (1 - progress.value)

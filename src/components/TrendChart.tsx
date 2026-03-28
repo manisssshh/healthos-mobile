@@ -12,8 +12,14 @@ function buildPath(values: number[], width: number, height: number): string {
     return "";
   }
 
+  if (values.length === 1) {
+    const maxValue = Math.max(values[0], 1);
+    const y = height - (values[0] / maxValue) * height;
+    return `M 0 ${y} L ${width} ${y}`;
+  }
+
   const maxValue = Math.max(...values, 1);
-  const stepX = values.length > 1 ? width / (values.length - 1) : width;
+  const stepX = width / (values.length - 1);
 
   return values
     .map((value, index) => {

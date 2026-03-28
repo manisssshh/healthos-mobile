@@ -69,7 +69,7 @@ function AnimatedBar({ value, maxValue, color, index, height, colors }: Animated
       index * 60,
       withTiming(targetHeight, { duration: 600 })
     );
-  }, [targetHeight, index]);
+  }, [targetHeight, index, barHeight]);
 
   const animatedStyle = useAnimatedStyle(() => ({
     height: barHeight.value
