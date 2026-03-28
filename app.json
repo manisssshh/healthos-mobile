@@ -66,6 +66,14 @@
         {
           "package": "com.samsung.android.wear.shealth"
         }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "minSdkVersion": 26
+          }
+        }
       ]
     ],
     "extra": {
