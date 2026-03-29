@@ -3,6 +3,7 @@ import { useState } from "react";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import type { DailyMealTemplate } from "../types/health";
+import { useTheme } from "../context/ThemeContext";
 
 type Props = { templates: DailyMealTemplate[] };
 
@@ -34,27 +35,28 @@ function getColor(label: string): string {
 }
 
 export function MealPlanCard({ templates }: Props): JSX.Element {
+  const { colors } = useTheme();
   const [activeIndex, setActiveIndex] = useState(0);
   const active = templates[activeIndex];
   if (!active) return <></>;
   const color = getColor(active.label);
 
   return (
-    <View className="mt-4 rounded-2xl overflow-hidden" style={{ borderWidth: 1, borderColor: "rgba(255,255,255,0.08)", borderRadius: 20 }}>
+    <View style={{ marginTop: 16, borderRadius: 20, overflow: "hidden", borderWidth: 1, borderColor: colors.border }}>
       {/* Header */}
       <LinearGradient
         colors={[`${color}22`, `${color}08`]}
         start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
         style={{ padding: 16, paddingBottom: 12 }}
       >
-        <View className="flex-row items-center mb-3">
+        <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 12 }}>
           <MaterialCommunityIcons name="food-apple-outline" size={15} color={color} />
-          <Text style={{ color }} className="text-xs tracking-widest font-bold ml-2">AI MEAL PLAN</Text>
+          <Text style={{ color, fontSize: 11, letterSpacing: 1.5, fontWeight: "700", marginLeft: 8 }}>AI MEAL PLAN</Text>
         </View>
 
         {/* Tab switcher */}
         <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-          <View className="flex-row" style={{ gap: 8 }}>
+          <View style={{ flexDirection: "row", gap: 8 }}>
             {templates.map((t, i) => {
               const tc = getColor(t.label);
               const isActive = i === activeIndex;
@@ -63,13 +65,13 @@ export function MealPlanCard({ templates }: Props): JSX.Element {
                   key={t.label}
                   onPress={() => setActiveIndex(i)}
                   style={{
-                    backgroundColor: isActive ? `${tc}30` : "rgba(255,255,255,0.05)",
-                    borderColor: isActive ? `${tc}80` : "rgba(255,255,255,0.10)",
+                    backgroundColor: isActive ? `${tc}30` : colors.overlayLight,
+                    borderColor: isActive ? `${tc}80` : colors.border,
                     borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 8,
                   }}
                 >
-                  <Text style={{ color: isActive ? tc : "#A8A8BF" }} className="text-sm font-semibold">{t.label}</Text>
-                  <Text style={{ color: isActive ? tc : "#666680" }} className="text-xs mt-0.5">{t.total_calories} kcal</Text>
+                  <Text style={{ color: isActive ? tc : colors.textMuted, fontSize: 14, fontWeight: "600" }}>{t.label}</Text>
+                  <Text style={{ color: isActive ? tc : colors.textMuted, fontSize: 12, marginTop: 2, opacity: 0.7 }}>{t.total_calories} kcal</Text>
                 </Pressable>
               );
             })}
@@ -78,13 +80,13 @@ export function MealPlanCard({ templates }: Props): JSX.Element {
       </LinearGradient>
 
       {/* Meal list */}
-      <View style={{ backgroundColor: "#141420", padding: 14, gap: 10 }}>
+      <View style={{ backgroundColor: colors.surface, padding: 14, gap: 10 }}>
         {active.meals.map((meal, index) => (
           <View
             key={`${meal.name}-${index}`}
             style={{
-              backgroundColor: "rgba(255,255,255,0.04)",
-              borderColor: "rgba(255,255,255,0.07)",
+              backgroundColor: colors.overlayLight,
+              borderColor: colors.border,
               borderWidth: 1, borderRadius: 14, padding: 12,
               flexDirection: "row", alignItems: "center",
             }}
@@ -97,16 +99,16 @@ export function MealPlanCard({ templates }: Props): JSX.Element {
             </View>
 
             {/* Info */}
-            <View className="flex-1">
-              <Text className="text-white text-sm font-semibold">{meal.name}</Text>
-              {meal.notes ? <Text className="text-textMuted text-xs mt-0.5">{meal.notes}</Text> : null}
-              <Text style={{ color: "#666680" }} className="text-xs mt-0.5">{meal.time}</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: colors.text, fontSize: 14, fontWeight: "600" }}>{meal.name}</Text>
+              {meal.notes ? <Text style={{ color: colors.textMuted, fontSize: 12, marginTop: 2 }}>{meal.notes}</Text> : null}
+              <Text style={{ color: colors.textMuted, fontSize: 12, marginTop: 2 }}>{meal.time}</Text>
             </View>
 
             {/* Calories badge */}
             <View style={{ backgroundColor: `${color}18`, borderRadius: 10, paddingHorizontal: 8, paddingVertical: 4 }}>
-              <Text style={{ color }} className="text-xs font-bold">{meal.calories}</Text>
-              <Text style={{ color: `${color}80` }} className="text-xs">kcal</Text>
+              <Text style={{ color, fontSize: 12, fontWeight: "700" }}>{meal.calories}</Text>
+              <Text style={{ color: `${color}80`, fontSize: 11 }}>kcal</Text>
             </View>
           </View>
         ))}
@@ -117,11 +119,11 @@ export function MealPlanCard({ templates }: Props): JSX.Element {
           start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
           style={{ borderRadius: 12, borderWidth: 1, borderColor: `${color}30`, padding: 12, flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}
         >
-          <View className="flex-row items-center">
+          <View style={{ flexDirection: "row", alignItems: "center" }}>
             <MaterialCommunityIcons name="fire" size={16} color={color} />
-            <Text className="text-textMuted text-sm ml-2">Daily Total</Text>
+            <Text style={{ color: colors.textMuted, fontSize: 14, marginLeft: 8 }}>Daily Total</Text>
           </View>
-          <Text style={{ color }} className="text-lg font-extrabold">{active.total_calories} kcal</Text>
+          <Text style={{ color, fontSize: 18, fontWeight: "800" }}>{active.total_calories} kcal</Text>
         </LinearGradient>
       </View>
     </View>

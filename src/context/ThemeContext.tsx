@@ -44,22 +44,22 @@ export const DARK_THEME: ThemeColors = {
 };
 
 export const LIGHT_THEME: ThemeColors = {
-  background: "#F0F2F8",
-  surface: "#FFFFFF",
-  card: "#FFFFFF",
-  cardMuted: "#F5F6FA",
-  border: "rgba(0,0,0,0.07)",
-  borderStrong: "rgba(0,0,0,0.15)",
-  text: "#0B0B1F",
-  textSecondary: "#2D2D4A",
-  textMuted: "#6B7280",
+  background: "#ECEAF8",
+  surface: "#F5F3FF",
+  card: "#F9F8FF",
+  cardMuted: "#EDEAF8",
+  border: "rgba(100,80,200,0.12)",
+  borderStrong: "rgba(100,80,200,0.22)",
+  text: "#0D0A2E",
+  textSecondary: "#2A2255",
+  textMuted: "#6B5F8A",
   accentBlue: "#3D6AEE",
   accentPurple: "#7A52E8",
-  success: "#00B884",
-  zoneHigh: "#00B884",
-  zoneMid: "#E09020",
-  zoneLow: "#E03050",
-  overlayLight: "rgba(0,0,0,0.04)",
+  success: "#00A876",
+  zoneHigh: "#00A876",
+  zoneMid: "#D08010",
+  zoneLow: "#D02848",
+  overlayLight: "rgba(100,80,200,0.05)",
 };
 
 // ─── Context ──────────────────────────────────────────────────────────────────

@@ -2,7 +2,7 @@ import { ScrollView, Text, View, Pressable } from "react-native";
 import { useEffect, useMemo, useState } from "react";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
-import Animated, { FadeIn, FadeInDown } from "react-native-reanimated";
+import Animated, { FadeIn, FadeInDown, useSharedValue, useAnimatedStyle, withRepeat, withTiming, Easing } from "react-native-reanimated";
 import { HeroRing, RingChart } from "../components/RingChart";
 import { InsightCard } from "../components/InsightCard";
 import { MealTracker } from "../components/MealTracker";
@@ -249,6 +249,28 @@ export function HomeScreen(): JSX.Element {
 
   const { colors, isDark } = useTheme();
   const [doctorInsight, setDoctorInsight] = useState("Loading your personalized insight...");
+
+  // Animated background orbs
+  const orb1 = useSharedValue(0);
+  const orb2 = useSharedValue(0);
+  const orb3 = useSharedValue(0);
+  useEffect(() => {
+    orb1.value = withRepeat(withTiming(1, { duration: 7000, easing: Easing.inOut(Easing.sin) }), -1, true);
+    orb2.value = withRepeat(withTiming(1, { duration: 9000, easing: Easing.inOut(Easing.sin) }), -1, true);
+    orb3.value = withRepeat(withTiming(1, { duration: 11000, easing: Easing.inOut(Easing.sin) }), -1, true);
+  }, [orb1, orb2, orb3]);
+  const orb1Style = useAnimatedStyle(() => ({
+    opacity: 0.35 + orb1.value * 0.20,
+    transform: [{ scale: 0.92 + orb1.value * 0.16 }, { translateY: orb1.value * -18 }],
+  }));
+  const orb2Style = useAnimatedStyle(() => ({
+    opacity: 0.25 + orb2.value * 0.15,
+    transform: [{ scale: 0.88 + orb2.value * 0.20 }, { translateY: orb2.value * 22 }],
+  }));
+  const orb3Style = useAnimatedStyle(() => ({
+    opacity: 0.20 + orb3.value * 0.12,
+    transform: [{ scale: 0.95 + orb3.value * 0.10 }, { translateX: orb3.value * 14 }],
+  }));
   const todayWorkoutKey = useMemo(() => getTodayWorkoutKey(), []);
 
   useEffect(() => {
@@ -300,6 +322,11 @@ export function HomeScreen(): JSX.Element {
   if (!todayRecord || !profile) return <View style={{ flex: 1 }} />;
 
   return (
+    <View style={{ flex: 1 }}>
+      {/* Animated background orbs */}
+      <Animated.View style={[{ position: "absolute", top: -60, left: -80, width: 280, height: 280, borderRadius: 140, backgroundColor: isDark ? "rgba(154,108,255,0.18)" : "rgba(122,82,232,0.12)" }, orb1Style]} />
+      <Animated.View style={[{ position: "absolute", top: 200, right: -100, width: 320, height: 320, borderRadius: 160, backgroundColor: isDark ? "rgba(79,123,255,0.14)" : "rgba(61,106,238,0.09)" }, orb2Style]} />
+      <Animated.View style={[{ position: "absolute", top: 500, left: -60, width: 240, height: 240, borderRadius: 120, backgroundColor: isDark ? "rgba(26,229,167,0.10)" : "rgba(0,168,118,0.08)" }, orb3Style]} />
     <ScrollView
       style={{ flex: 1 }}
       contentContainerStyle={{ paddingBottom: 130 }}
@@ -318,7 +345,7 @@ export function HomeScreen(): JSX.Element {
           start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
           style={{
             borderRadius: 20, borderWidth: 1,
-            borderColor: "rgba(255,255,255,0.15)",
+            borderColor: colors.borderStrong,
             paddingHorizontal: 14, paddingVertical: 7
           }}
         >
@@ -656,5 +683,6 @@ export function HomeScreen(): JSX.Element {
         </Animated.View>
       )}
     </ScrollView>
+    </View>
   );
 }

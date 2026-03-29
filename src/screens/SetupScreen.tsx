@@ -16,6 +16,7 @@ import {
 import { useHealthStore } from "../store/useHealthStore";
 import { getTodayDateKey } from "../utils/dateUtils";
 import { pickAndStoreReportFile } from "../services/reportFileService";
+import { useTheme } from "../context/ThemeContext";
 
 type GoalCardProps = {
   label: string;
@@ -24,19 +25,20 @@ type GoalCardProps = {
 };
 
 function GoalCard({ label, active, onPress }: GoalCardProps): JSX.Element {
+  const { colors, isDark } = useTheme();
   return (
-    <Pressable onPress={onPress} className="flex-1">
+    <Pressable onPress={onPress} style={{ flex: 1 }}>
       <LinearGradient
-        colors={active ? ["rgba(79,123,255,0.35)", "rgba(154,108,255,0.25)"] : ["#1A1A24", "#161620"]}
+        colors={active ? ["rgba(79,123,255,0.35)", "rgba(154,108,255,0.25)"] : isDark ? ["#1A1A24", "#161620"] : [colors.card, colors.cardMuted]}
         style={{
           borderRadius: 16,
           borderWidth: 1,
-          borderColor: active ? "rgba(255,255,255,0.24)" : "rgba(255,255,255,0.08)",
+          borderColor: active ? colors.borderStrong : colors.border,
           paddingVertical: 12,
           paddingHorizontal: 10
         }}
       >
-        <Text className="text-white text-sm font-semibold text-center">{label}</Text>
+        <Text style={{ color: active ? "#FFFFFF" : colors.text, fontSize: 14, fontWeight: "600", textAlign: "center" }}>{label}</Text>
       </LinearGradient>
     </Pressable>
   );
