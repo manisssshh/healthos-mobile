@@ -14,7 +14,7 @@
  *   - Robust JSON extraction with markdown fence stripping as a fallback
  */
 import * as FileSystem from "expo-file-system";
-import { extractMedicalTextFromImages, convertPdfToBase64Image, getGroqApiKey } from "./groqService";
+import { extractMedicalTextFromImages, convertPdfToBase64Image, getGroqApiKey, callGroq } from "./groqService";
 import { RateLimitError, parseRetryDelay } from "./rateLimitError";
 import type {
   AiPersonalization,
@@ -601,37 +601,36 @@ export async function analyzeReportsForPersonalization(
     } else {
       const groqKey = getGroqApiKey();
 
-      if (groqKey && apiKey) {
-        // ── Two-step pipeline: Groq reads ALL files → Gemini analyses text ──
-        // Convert PDFs to images first so Groq can read them
+      if (groqKey) {
+        // ── Groq full pipeline: read files + analyse (14,400 req/day free) ──
         const allAsImages: Array<{ base64: string; mediaType: string; name: string }> = [];
         for (const att of attachments) {
-          if (att.mediaType === "application/pdf" && att.localUri) {
-            const pdfBase64 = await convertPdfToBase64Image(att.localUri);
-            if (pdfBase64) allAsImages.push({ base64: pdfBase64, mediaType: "image/jpeg", name: att.name });
-          } else if (att.base64) {
+          if (att.base64) {
             allAsImages.push({ base64: att.base64, mediaType: att.mediaType, name: att.name });
           }
         }
 
-        if (allAsImages.length > 0) {
-          // Step 1: Groq extracts raw text from all files (grunt work)
-          const extractedText = await extractMedicalTextFromImages(allAsImages);
-          // Step 2: Gemini analyses clean text — no files, no quota waste
-          const analysisPrompt = [
-            buildContextPrompt(profile, reports),
-            "--- EXTRACTED REPORT CONTENT (via OCR) ---",
-            extractedText,
-            "--- END OF REPORT ---",
-            "Use the extracted report content above to build the personalized health plan.",
-          ].join("\n\n");
-          rawOutput = await callGeminiWithText(apiKey, analysisPrompt);
-        } else {
-          // No readable attachments — Gemini analyses from report metadata only
-          rawOutput = await callGeminiWithText(apiKey, buildContextPrompt(profile, reports));
-        }
+        const extractedText = allAsImages.length > 0
+          ? await extractMedicalTextFromImages(allAsImages)
+          : "";
+
+        const analysisPrompt = extractedText
+          ? [
+              buildContextPrompt(profile, reports),
+              "--- EXTRACTED REPORT CONTENT (via OCR) ---",
+              extractedText,
+              "--- END OF REPORT ---",
+              "Use the extracted report content above to build the personalized health plan.",
+            ].join("\n\n")
+          : buildContextPrompt(profile, reports);
+
+        const messages = [
+          { role: "system" as const, content: AI_SYSTEM_PROMPT },
+          { role: "user" as const, content: analysisPrompt },
+        ];
+        rawOutput = await callGroq(messages, 8192);
       } else if (apiKey) {
-        // ── Gemini full pipeline: no Groq key configured ─────────────────────
+        // ── Gemini fallback: only when no Groq key configured ────────────────
         rawOutput = await callGeminiWithFiles(apiKey, profile, reports, attachments);
       } else {
         return fallbackPersonalization(profile, reports, "No AI API key configured.");
