@@ -12,6 +12,8 @@
 import * as FileSystem from "expo-file-system";
 import type { HealthReport, Supplement, SupplementInput, SupplementTiming } from "../types/health";
 import type { DoctorNoteInput } from "../types/health";
+import { RateLimitError, parseRetryDelay } from "./aiPersonalizationService";
+import { extractMedicalTextFromImages, convertPdfToBase64Image, getGroqApiKey } from "./groqService";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -65,9 +67,10 @@ If recommendations are not visible, return "Follow doctor's instructions as pres
 
 // ─── Env helper ───────────────────────────────────────────────────────────────
 
-function readEnv(name: string): string {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return ((process as any).env?.[name] ?? "").trim();
+function readEnv(_name: string): string {
+  // Metro statically replaces process.env.EXPO_PUBLIC_* at bundle time.
+  // Dynamic bracket access (process.env[name]) does NOT work in React Native.
+  return (process.env.EXPO_PUBLIC_GEMINI_API_KEY ?? "").trim();
 }
 
 // ─── JSON Parsing ─────────────────────────────────────────────────────────────
@@ -242,57 +245,106 @@ export async function extractSupplementsFromPrescriptions(
 
   if (!prescriptions.length) return emptyResult;
 
-  const apiKey = readEnv("EXPO_PUBLIC_GEMINI_API_KEY");
-  if (!apiKey) return emptyResult;
+  const geminiKey = readEnv("EXPO_PUBLIC_GEMINI_API_KEY");
+  const groqKey = getGroqApiKey();
+  if (!geminiKey && !groqKey) return emptyResult;
 
   const attachments = await loadAttachments(prescriptions);
   if (!attachments.length) return emptyResult;
 
+  const hasPdfs = attachments.some((a) => a.mediaType === "application/pdf");
+  const hasImages = attachments.some((a) => a.mediaType !== "application/pdf" && a.base64);
+
   try {
-    const parts: Array<Record<string, unknown>> = [
-      { text: `Extract all supplements and medications from the attached doctor's prescription. Date: ${new Date().toLocaleDateString("en-IN")}` },
-    ];
+    let text: string;
 
-    for (const att of attachments) {
-      if (att.mediaType === "application/pdf" && att.localUri) {
-        try {
-          const geminiUri = await uploadPdfToGeminiFiles(apiKey, att.localUri, att.name);
-          parts.push({ fileData: { mimeType: "application/pdf", fileUri: geminiUri } });
-        } catch (err) {
-          console.warn("[HealthOS] Supplement PDF upload skipped:", err);
+    if (groqKey && geminiKey) {
+      // ── Two-step: Groq reads ALL files → Gemini extracts supplements ──────
+      const allAsImages: Array<{ base64: string; mediaType: string; name: string }> = [];
+      for (const att of attachments) {
+        if (att.mediaType === "application/pdf" && att.localUri) {
+          const pdfBase64 = await convertPdfToBase64Image(att.localUri);
+          if (pdfBase64) allAsImages.push({ base64: pdfBase64, mediaType: "image/jpeg", name: att.name });
+        } else if (att.base64) {
+          allAsImages.push({ base64: att.base64, mediaType: att.mediaType, name: att.name });
         }
-      } else if (att.base64) {
-        parts.push({ inlineData: { mimeType: att.mediaType, data: att.base64 } });
       }
-    }
 
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          systemInstruction: { parts: [{ text: SUPPLEMENT_PROMPT }] },
-          contents: [{ role: "user", parts }],
-          generationConfig: {
-            temperature: 0.1,
-            maxOutputTokens: 4096,
-            responseMimeType: "application/json",
-          },
-        }),
+      const extractedText = allAsImages.length > 0
+        ? await extractMedicalTextFromImages(allAsImages)
+        : "";
+
+      const analysisPrompt = [
+        `Extract all supplements and medications from this prescription. Date: ${new Date().toLocaleDateString("en-IN")}`,
+        "--- EXTRACTED PRESCRIPTION CONTENT ---",
+        extractedText || "No content could be extracted.",
+        "--- END ---",
+      ].join("\n\n");
+
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            systemInstruction: { parts: [{ text: SUPPLEMENT_PROMPT }] },
+            contents: [{ role: "user", parts: [{ text: analysisPrompt }] }],
+            generationConfig: { temperature: 0.1, maxOutputTokens: 4096, responseMimeType: "application/json" },
+          }),
+        }
+      );
+      if (!response.ok) {
+        const errText = await response.text().catch(() => "");
+        if (response.status === 429) throw new RateLimitError(parseRetryDelay(errText));
+        throw new Error(`Gemini failed (${response.status}): ${errText.slice(0, 200)}`);
       }
-    );
+      const data = await response.json() as {
+        candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+      };
+      text = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+      if (!text) throw new Error("Empty Gemini response.");
 
-    if (!response.ok) {
-      const errText = await response.text().catch(() => "");
-      throw new Error(`Gemini failed (${response.status}): ${errText.slice(0, 200)}`);
+    } else {
+      // ── Gemini full pipeline: no Groq key configured ──────────────────────
+      if (!geminiKey) return emptyResult;
+      const parts: Array<Record<string, unknown>> = [
+        { text: `Extract all supplements and medications from the attached doctor's prescription. Date: ${new Date().toLocaleDateString("en-IN")}` },
+      ];
+      for (const att of attachments) {
+        if (att.mediaType === "application/pdf" && att.localUri) {
+          try {
+            const geminiUri = await uploadPdfToGeminiFiles(geminiKey, att.localUri, att.name);
+            parts.push({ fileData: { mimeType: "application/pdf", fileUri: geminiUri } });
+          } catch (err) {
+            console.warn("[HealthOS] Supplement PDF upload skipped:", err);
+          }
+        } else if (att.base64) {
+          parts.push({ inlineData: { mimeType: att.mediaType, data: att.base64 } });
+        }
+      }
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            systemInstruction: { parts: [{ text: SUPPLEMENT_PROMPT }] },
+            contents: [{ role: "user", parts }],
+            generationConfig: { temperature: 0.1, maxOutputTokens: 4096, responseMimeType: "application/json" },
+          }),
+        }
+      );
+      if (!response.ok) {
+        const errText = await response.text().catch(() => "");
+        if (response.status === 429) throw new RateLimitError(parseRetryDelay(errText));
+        throw new Error(`Gemini failed (${response.status}): ${errText.slice(0, 200)}`);
+      }
+      const data = await response.json() as {
+        candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+      };
+      text = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+      if (!text) throw new Error("Empty Gemini response.");
     }
-
-    const data = await response.json() as {
-      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
-    };
-    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!text) throw new Error("Empty Gemini response.");
 
     const parsed = extractJson(text) as Record<string, unknown>;
     return {
@@ -300,6 +352,7 @@ export async function extractSupplementsFromPrescriptions(
       doctorNote: buildDoctorNote(parsed, prescriptions),
     };
   } catch (error) {
+    if (error instanceof RateLimitError) throw error; // bubble up for Alert popup
     console.error("[HealthOS] Supplement extraction failed:", error);
     return emptyResult;
   }

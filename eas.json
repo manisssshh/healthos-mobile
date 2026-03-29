@@ -8,7 +8,7 @@
       "developmentClient": true,
       "distribution": "internal",
       "env": {
-        "EXPO_PUBLIC_GEMINI_API_KEY": "$EXPO_PUBLIC_GEMINI_API_KEY"
+        "EXPO_PUBLIC_GEMINI_API_KEY": "AIzaSyCSeR5hEFofvWGOohXv9Incf-zwi2soacA"
       }
     },
     "preview": {
@@ -17,7 +17,7 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_GEMINI_API_KEY": "AIzaSyCiSNcl9SENUzIE5C0alfK8EJ9fapzJCQk"
+        "EXPO_PUBLIC_GEMINI_API_KEY": "AIzaSyCSeR5hEFofvWGOohXv9Incf-zwi2soacA"
       }
     },
     "production": {
@@ -26,7 +26,7 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_GEMINI_API_KEY": "AIzaSyCiSNcl9SENUzIE5C0alfK8EJ9fapzJCQk"
+        "EXPO_PUBLIC_GEMINI_API_KEY": "AIzaSyCSeR5hEFofvWGOohXv9Incf-zwi2soacA"
       }
     }
   },

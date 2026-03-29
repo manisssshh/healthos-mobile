@@ -118,10 +118,11 @@ export function LogScreen(): JSX.Element {
   const activeMetrics     = useHealthStore((s) => s.activeMetrics);
   const reports           = useHealthStore((s) => s.reports);
   const aiPersonalization = useHealthStore((s) => s.aiPersonalization);
-  const isAnalyzingAi     = useHealthStore((s) => s.isAnalyzingAi);
-  const aiError           = useHealthStore((s) => s.aiError);
-  const watchData         = useHealthStore((s) => s.watchData);
-  const clearAiError      = useHealthStore((s) => s.clearAiError);
+  const isAnalyzingAi        = useHealthStore((s) => s.isAnalyzingAi);
+  const aiError              = useHealthStore((s) => s.aiError);
+  const aiRateLimitSeconds   = useHealthStore((s) => s.aiRateLimitSeconds);
+  const watchData            = useHealthStore((s) => s.watchData);
+  const clearAiError         = useHealthStore((s) => s.clearAiError);
   const runAiPersonalization = useHealthStore((s) => s.runAiPersonalization);
   const addReport         = useHealthStore((s) => s.addReport);
   const removeReport      = useHealthStore((s) => s.removeReport);
@@ -149,6 +150,8 @@ export function LogScreen(): JSX.Element {
   const [analysisStepIndex, setAnalysisStepIndex] = useState(0);
   const [isSyncingWatch, setIsSyncingWatch] = useState(false);
   const [watchAvailable, setWatchAvailable] = useState(false);
+  const [countdown, setCountdown] = useState<number | null>(null);
+  const retryGlow = useSharedValue(0);
 
   const shouldTrackWeight = useMemo(() => activeMetrics.includes("weight"), [activeMetrics]);
   const shouldTrackBp     = useMemo(() => activeMetrics.includes("blood_pressure_sys"), [activeMetrics]);
@@ -190,6 +193,32 @@ export function LogScreen(): JSX.Element {
   useEffect(() => {
     isHealthConnectAvailable().then(setWatchAvailable).catch(() => {});
   }, []);
+
+  // Rate limit countdown
+  useEffect(() => {
+    if (!aiRateLimitSeconds) { setCountdown(null); return; }
+    setCountdown(aiRateLimitSeconds);
+    retryGlow.value = 0;
+    const timer = setInterval(() => {
+      setCountdown((prev) => {
+        if (prev === null || prev <= 1) {
+          clearInterval(timer);
+          retryGlow.value = withTiming(1, { duration: 600 });
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [aiRateLimitSeconds]);
+
+  const retryGlowStyle = useAnimatedStyle(() => ({
+    opacity: 0.5 + retryGlow.value * 0.5,
+    transform: [{ scale: 1 + retryGlow.value * 0.04 }],
+    shadowOpacity: retryGlow.value * 0.8,
+    shadowRadius: retryGlow.value * 12,
+    elevation: retryGlow.value * 8,
+  }));
 
   if (!todayRecord) return <View style={{ flex: 1 }} />;
 
@@ -581,13 +610,66 @@ export function LogScreen(): JSX.Element {
 
             {aiError && (
               <View style={{
-                borderRadius: 14, borderWidth: 1, borderColor: "rgba(239,71,111,0.25)",
-                backgroundColor: "rgba(239,71,111,0.08)", padding: 12
+                borderRadius: 14, borderWidth: 1,
+                borderColor: aiError === "rate_limit" ? "rgba(255,180,0,0.35)" : "rgba(239,71,111,0.25)",
+                backgroundColor: aiError === "rate_limit" ? "rgba(255,180,0,0.08)" : "rgba(239,71,111,0.08)",
+                padding: 12
               }}>
-                <Text style={{ color: "#EF476F", fontSize: 12 }}>{aiError}</Text>
-                <View style={{ marginTop: 10 }}>
-                  <ScaleButton label="Retry" onPress={() => { clearAiError(); void runAiPersonalization(); }} variant="secondary" />
-                </View>
+                {aiError === "rate_limit" ? (
+                  <>
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                      <MaterialCommunityIcons name="clock-outline" size={16} color="#FFB238" />
+                      <Text style={{ color: "#FFB238", fontSize: 13, fontWeight: "700" }}>
+                        Rate Limit Reached
+                      </Text>
+                    </View>
+                    <Text style={{ color: colors.textMuted, fontSize: 11, marginTop: 4 }}>
+                      Gemini free tier: 15 requests/min · resets daily at midnight PT
+                    </Text>
+                    {countdown !== null && countdown > 0 && (
+                      <View style={{
+                        flexDirection: "row", alignItems: "center", gap: 6,
+                        marginTop: 10, backgroundColor: "rgba(255,178,56,0.12)",
+                        borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8
+                      }}>
+                        <MaterialCommunityIcons name="timer-outline" size={16} color="#FFB238" />
+                        <Text style={{ color: "#FFB238", fontSize: 15, fontWeight: "800", fontVariant: ["tabular-nums"] }}>
+                          {countdown}s
+                        </Text>
+                        <Text style={{ color: colors.textMuted, fontSize: 11 }}>
+                          until retry available
+                        </Text>
+                      </View>
+                    )}
+                    <Animated.View style={[{ marginTop: 10 }, retryGlowStyle]}>
+                      <Pressable
+                        onPress={() => { if (countdown === 0) { clearAiError(); void runAiPersonalization(); } }}
+                        disabled={countdown !== 0}
+                        style={{
+                          borderRadius: 12, paddingVertical: 11, alignItems: "center",
+                          backgroundColor: countdown === 0 ? "#FFB238" : colors.cardMuted,
+                          borderWidth: countdown === 0 ? 0 : 1,
+                          borderColor: colors.border,
+                          shadowColor: "#FFB238",
+                        }}
+                      >
+                        <Text style={{
+                          fontSize: 13, fontWeight: "700",
+                          color: countdown === 0 ? "#000" : colors.textMuted
+                        }}>
+                          {countdown === 0 ? "⚡ Retry Now" : `Retry in ${countdown}s`}
+                        </Text>
+                      </Pressable>
+                    </Animated.View>
+                  </>
+                ) : (
+                  <>
+                    <Text style={{ color: "#EF476F", fontSize: 12 }}>{aiError}</Text>
+                    <View style={{ marginTop: 10 }}>
+                      <ScaleButton label="Retry" onPress={() => { clearAiError(); void runAiPersonalization(); }} variant="secondary" />
+                    </View>
+                  </>
+                )}
               </View>
             )}
 

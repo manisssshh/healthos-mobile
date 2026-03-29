@@ -11,6 +11,7 @@ import type {
   UserProfile
 } from "../types/health";
 import { getDoctorInsight } from "./insightService";
+import { callGroqText, getGroqApiKey, type GroqMessage } from "./groqService";
 
 type InsightRequest = {
   profile: UserProfile;
@@ -26,10 +27,10 @@ Generate a single SHORT paragraph (2-4 sentences) of personalized, clinically re
 daily health insight. Be specific about what metric is doing well or needs attention.
 Write directly to the user. No markdown, no lists, just plain prose. No fluff.`;
 
-function readEnv(name: string): string {
-  // Expo inlines EXPO_PUBLIC_ vars into process.env at bundle time.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return ((process as any).env?.[name] ?? "").trim();
+function readEnv(_name: string): string {
+  // Metro statically replaces process.env.EXPO_PUBLIC_* at bundle time.
+  // Dynamic bracket access does NOT work in React Native.
+  return (process.env.EXPO_PUBLIC_GEMINI_API_KEY ?? "").trim();
 }
 
 function formatWeeklySummary(records: DailyHealthRecord[], metrics: HealthMetricKey[]): string {
@@ -64,7 +65,7 @@ async function callGeminiInsight(apiKey: string, req: InsightRequest): Promise<s
     req.aiPersonalization?.summary ? `AI Plan Summary: ${req.aiPersonalization.summary}` : ""
   ].filter(Boolean).join("\n");
 
-  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
+  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json"
@@ -101,28 +102,35 @@ async function callGeminiInsight(apiKey: string, req: InsightRequest): Promise<s
  * Uses Gemini if an API key is configured, otherwise falls back to local rules.
  */
 export async function generateDailyInsight(req: InsightRequest): Promise<string> {
-  const apiKey = readEnv("EXPO_PUBLIC_GEMINI_API_KEY");
-  if (!apiKey) {
-    // Fallback to deterministic local insight.
-    return getDoctorInsight(
-      req.todayRecord,
-      req.profile,
-      req.activeMetrics,
-      req.weeklyRecords,
-      req.aiPersonalization
-    );
-  }
+  const localFallback = () => getDoctorInsight(
+    req.todayRecord, req.profile, req.activeMetrics, req.weeklyRecords, req.aiPersonalization
+  );
+
+  const groqKey = getGroqApiKey();
+  const geminiKey = readEnv("EXPO_PUBLIC_GEMINI_API_KEY");
 
   try {
-    return await callGeminiInsight(apiKey, req);
-  } catch (_error) {
-    // On any failure, gracefully fall back to local insight.
-    return getDoctorInsight(
-      req.todayRecord,
-      req.profile,
-      req.activeMetrics,
-      req.weeklyRecords,
-      req.aiPersonalization
-    );
-  }
+    if (groqKey) {
+      // Groq: daily insights (pure text, 14,400 req/day free, no Gemini quota used)
+      const userMessage = [
+        `Profile: age=${req.profile.age}, weight=${req.profile.weight}kg, goal=${req.profile.goal}, conditions=${req.profile.conditions.join(", ") || "none"}`,
+        `Today: sleep=${req.todayRecord.sleep_hours}h, steps=${req.todayRecord.steps}, water=${req.todayRecord.water_ml}ml, calories=${req.todayRecord.calories}kcal, bp=${req.todayRecord.blood_pressure_sys}/${req.todayRecord.blood_pressure_dia}, hr=${req.todayRecord.heart_rate}bpm, sugar=${req.todayRecord.blood_sugar}mg/dL`,
+        `Weekly averages:\n${formatWeeklySummary(req.weeklyRecords, req.activeMetrics)}`,
+        req.aiPersonalization?.summary ? `AI Plan: ${req.aiPersonalization.summary}` : ""
+      ].filter(Boolean).join("\n");
+
+      const messages: GroqMessage[] = [
+        { role: "system", content: INSIGHT_SYSTEM_PROMPT + "\nReturn a plain text paragraph only, no JSON." },
+        { role: "user", content: userMessage },
+      ];
+      const text = await callGroqText(messages, 300);
+      if (text) return text;
+    }
+
+    if (geminiKey) {
+      return await callGeminiInsight(geminiKey, req);
+    }
+  } catch { /* fall through */ }
+
+  return localFallback();
 }

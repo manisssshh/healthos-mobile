@@ -59,11 +59,12 @@ import {
   clearDoctorNotes,
 } from "../services/storageService";
 import type { AppSettings } from "../services/storageService";
-import { analyzeReportsForPersonalization } from "../services/aiPersonalizationService";
+import { analyzeReportsForPersonalization, RateLimitError } from "../services/aiPersonalizationService";
 import { extractSupplementsFromPrescriptions } from "../services/supplementAiService";
 import { rescheduleAllSupplementReminders, cancelSupplementReminders } from "../services/supplementReminderService";
 import { resolveActiveMetrics } from "../services/metricService";
 import { getTodayDateKey } from "../utils/dateUtils";
+import { Alert } from "react-native";
 
 type HealthStore = {
   profile: UserProfile | null;
@@ -76,6 +77,7 @@ type HealthStore = {
   isLoading: boolean;
   isAnalyzingAi: boolean;
   aiError: string | null;
+  aiRateLimitSeconds: number | null;
   watchData: WatchData | null;
   appSettings: AppSettings;
   // Supplements
@@ -84,6 +86,7 @@ type HealthStore = {
   todaySupplementLogs: SupplementLog[];
   isAnalyzingSupplements: boolean;
   supplementError: string | null;
+  supplementRateLimitSeconds: number | null;
   initialize: () => Promise<void>;
   ensureTodayRecord: () => Promise<void>;
   saveProfile: (profile: UserProfileInput) => Promise<void>;
@@ -152,6 +155,7 @@ export const useHealthStore = create<HealthStore>((set, get) => ({
   isLoading: true,
   isAnalyzingAi: false,
   aiError: null,
+  aiRateLimitSeconds: null,
   watchData: null,
   appSettings: DEFAULT_SETTINGS,
   supplements: [],
@@ -159,6 +163,7 @@ export const useHealthStore = create<HealthStore>((set, get) => ({
   todaySupplementLogs: [],
   isAnalyzingSupplements: false,
   supplementError: null,
+  supplementRateLimitSeconds: null,
 
   initialize: async () => {
     set({ isLoading: true });
@@ -317,17 +322,19 @@ export const useHealthStore = create<HealthStore>((set, get) => ({
         isAnalyzingAi: false
       });
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Could not analyze reports right now. Please retry.";
-      set({
-        isAnalyzingAi: false,
-        aiError: message
-      });
+      set({ isAnalyzingAi: false });
+      if (error instanceof RateLimitError) {
+        Alert.alert("⏱ Rate Limit Reached", error.message, [{ text: "OK" }]);
+        set({ aiError: "rate_limit", aiRateLimitSeconds: error.retryAfterSeconds });
+        return;
+      }
+      const message = error instanceof Error ? error.message : "Could not analyze reports right now. Please retry.";
+      set({ aiError: message });
     }
   },
 
   clearAiError: () => {
-    set({ aiError: null });
+    set({ aiError: null, aiRateLimitSeconds: null });
   },
 
   refreshWeeklyRecords: async () => {
@@ -541,8 +548,14 @@ export const useHealthStore = create<HealthStore>((set, get) => ({
       set({ supplements, doctorNotes, todaySupplementLogs, isAnalyzingSupplements: false });
       void rescheduleAllSupplementReminders(supplements);
     } catch (error) {
+      set({ isAnalyzingSupplements: false });
+      if (error instanceof RateLimitError) {
+        Alert.alert("⏱ Rate Limit Reached", error.message, [{ text: "OK" }]);
+        set({ supplementError: "rate_limit", supplementRateLimitSeconds: error.retryAfterSeconds });
+        return;
+      }
       const message = error instanceof Error ? error.message : "Could not extract supplements.";
-      set({ isAnalyzingSupplements: false, supplementError: message });
+      set({ supplementError: message });
     }
   },
 
@@ -565,7 +578,7 @@ export const useHealthStore = create<HealthStore>((set, get) => ({
   },
 
   clearSupplementError: () => {
-    set({ supplementError: null });
+    set({ supplementError: null, supplementRateLimitSeconds: null });
   },
 }));
 

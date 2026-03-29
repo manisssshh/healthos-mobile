@@ -14,6 +14,7 @@
  *   - Robust JSON extraction with markdown fence stripping as a fallback
  */
 import * as FileSystem from "expo-file-system";
+import { extractMedicalTextFromImages, convertPdfToBase64Image, getGroqApiKey } from "./groqService";
 import type {
   AiPersonalization,
   DailyMealTemplate,
@@ -28,6 +29,34 @@ import type {
 } from "../types/health";
 import { SLEEP_GOAL_HOURS, STEP_GOAL, WATER_GOAL_ML } from "../types/health";
 import { generateActiveMetrics, getCalorieTarget } from "./metricService";
+
+// ─── Rate Limit Error ─────────────────────────────────────────────────────────
+
+export class RateLimitError extends Error {
+  retryAfterSeconds: number;
+  constructor(retryAfterSeconds: number) {
+    const mins = Math.ceil(retryAfterSeconds / 60);
+    const label = retryAfterSeconds < 60
+      ? `${retryAfterSeconds} seconds`
+      : `${mins} minute${mins > 1 ? "s" : ""}`;
+    super(`RATE_LIMIT:${retryAfterSeconds}`);
+    this.name = "RateLimitError";
+    this.retryAfterSeconds = retryAfterSeconds;
+    // Friendly message stored separately
+    this.message = `Gemini API rate limit reached. Please retry in ${label}.\n\nFree tier resets every minute (15 req/min) and daily at midnight PT.`;
+  }
+}
+
+export function parseRetryDelay(body: string): number {
+  try {
+    const json = JSON.parse(body) as {
+      error?: { details?: Array<{ retryDelay?: string }> };
+    };
+    const delay = json?.error?.details?.find((d) => d.retryDelay)?.retryDelay;
+    if (delay) return parseInt(delay.replace("s", ""), 10) || 60;
+  } catch { /* ignore */ }
+  return 60; // default 60s if not parseable
+}
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -116,8 +145,15 @@ Rules:
 // ─── Env helper ───────────────────────────────────────────────────────────────
 
 function readEnv(name: string): string {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return ((process as any).env?.[name] ?? "").trim();
+  // Metro statically replaces process.env.EXPO_PUBLIC_* at bundle time.
+  // Dynamic bracket access (process.env[name]) does NOT work in React Native.
+  if (name === "EXPO_PUBLIC_GEMINI_API_KEY") {
+    return (process.env.EXPO_PUBLIC_GEMINI_API_KEY ?? "").trim();
+  }
+  if (name === "EXPO_PUBLIC_HEALTHOS_AI_ENDPOINT") {
+    return (process.env.EXPO_PUBLIC_HEALTHOS_AI_ENDPOINT ?? "").trim();
+  }
+  return "";
 }
 
 // ─── JSON Parsing — robust with markdown fence stripping ──────────────────────
@@ -249,9 +285,46 @@ function buildContextPrompt(profile: UserProfile, reports: HealthReport[]): stri
   ].join("\n");
 }
 
-// ─── Gemini API call ──────────────────────────────────────────────────────────
+// ─── Gemini analysis — text-only prompt (fast, low quota) ────────────────────
 
-async function callGeminiDirectly(
+async function callGeminiWithText(
+  apiKey: string,
+  textPrompt: string
+): Promise<unknown> {
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: AI_SYSTEM_PROMPT }] },
+        contents: [{ role: "user", parts: [{ text: textPrompt }] }],
+        generationConfig: {
+          temperature: 0.1,
+          maxOutputTokens: 8192,
+          responseMimeType: "application/json",
+        },
+      }),
+    }
+  );
+
+  if (!response.ok) {
+    const errText = await response.text().catch(() => "");
+    if (response.status === 429) throw new RateLimitError(parseRetryDelay(errText));
+    throw new Error(`Gemini request failed (${response.status}): ${errText.slice(0, 200)}`);
+  }
+
+  const data = await response.json() as {
+    candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+  };
+  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!text) throw new Error("Empty Gemini response.");
+  return text;
+}
+
+// ─── Gemini full pipeline — PDFs via Files API ────────────────────────────────
+
+async function callGeminiWithFiles(
   apiKey: string,
   profile: UserProfile,
   reports: HealthReport[],
@@ -285,7 +358,6 @@ async function callGeminiDirectly(
         generationConfig: {
           temperature: 0.1,
           maxOutputTokens: 8192,
-          // Forces Gemini to return clean JSON — no markdown, no explanation
           responseMimeType: "application/json",
         },
       }),
@@ -294,6 +366,7 @@ async function callGeminiDirectly(
 
   if (!response.ok) {
     const errText = await response.text().catch(() => "");
+    if (response.status === 429) throw new RateLimitError(parseRetryDelay(errText));
     throw new Error(`Gemini request failed (${response.status}): ${errText.slice(0, 200)}`);
   }
 
@@ -550,15 +623,50 @@ export async function analyzeReportsForPersonalization(
     let rawOutput: unknown;
     if (endpoint) {
       rawOutput = await callCustomEndpoint(endpoint, profile, reports, attachments);
-    } else if (apiKey) {
-      rawOutput = await callGeminiDirectly(apiKey, profile, reports, attachments);
     } else {
-      return fallbackPersonalization(profile, reports, "No AI API key configured.");
+      const groqKey = getGroqApiKey();
+
+      if (groqKey && apiKey) {
+        // ── Two-step pipeline: Groq reads ALL files → Gemini analyses text ──
+        // Convert PDFs to images first so Groq can read them
+        const allAsImages: Array<{ base64: string; mediaType: string; name: string }> = [];
+        for (const att of attachments) {
+          if (att.mediaType === "application/pdf" && att.localUri) {
+            const pdfBase64 = await convertPdfToBase64Image(att.localUri);
+            if (pdfBase64) allAsImages.push({ base64: pdfBase64, mediaType: "image/jpeg", name: att.name });
+          } else if (att.base64) {
+            allAsImages.push({ base64: att.base64, mediaType: att.mediaType, name: att.name });
+          }
+        }
+
+        if (allAsImages.length > 0) {
+          // Step 1: Groq extracts raw text from all files (grunt work)
+          const extractedText = await extractMedicalTextFromImages(allAsImages);
+          // Step 2: Gemini analyses clean text — no files, no quota waste
+          const analysisPrompt = [
+            buildContextPrompt(profile, reports),
+            "--- EXTRACTED REPORT CONTENT (via OCR) ---",
+            extractedText,
+            "--- END OF REPORT ---",
+            "Use the extracted report content above to build the personalized health plan.",
+          ].join("\n\n");
+          rawOutput = await callGeminiWithText(apiKey, analysisPrompt);
+        } else {
+          // No readable attachments — Gemini analyses from report metadata only
+          rawOutput = await callGeminiWithText(apiKey, buildContextPrompt(profile, reports));
+        }
+      } else if (apiKey) {
+        // ── Gemini full pipeline: no Groq key configured ─────────────────────
+        rawOutput = await callGeminiWithFiles(apiKey, profile, reports, attachments);
+      } else {
+        return fallbackPersonalization(profile, reports, "No AI API key configured.");
+      }
     }
 
     const parsed = coerceModelOutput(rawOutput);
     return sanitizePersonalization(parsed, profile, sourceReportIds, "AI plan generated from your uploaded reports.");
   } catch (error) {
+    if (error instanceof RateLimitError) throw error; // bubble up for Alert popup
     const reason = error instanceof Error ? error.message : "AI connection failed.";
     console.error("[HealthOS] AI personalization failed:", reason);
     return fallbackPersonalization(profile, reports, `AI issue: ${reason}`);
