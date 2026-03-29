@@ -14,7 +14,7 @@
  *   - Robust JSON extraction with markdown fence stripping as a fallback
  */
 import * as FileSystem from "expo-file-system";
-import { extractMedicalTextFromImages, convertPdfToBase64Image, getGroqApiKey, callGroq } from "./groqService";
+import { extractMedicalTextFromImages, convertPdfToBase64Image, getGroqApiKey, callGroq, extractTextFromPdfViaGemini } from "./groqService";
 import { RateLimitError, parseRetryDelay } from "./rateLimitError";
 import type {
   AiPersonalization,
@@ -603,21 +603,27 @@ export async function analyzeReportsForPersonalization(
 
       if (groqKey) {
         // ── Groq full pipeline: read files + analyse (14,400 req/day free) ──
-        const allAsImages: Array<{ base64: string; mediaType: string; name: string }> = [];
+        const textParts: string[] = [];
+
         for (const att of attachments) {
-          if (att.base64) {
-            allAsImages.push({ base64: att.base64, mediaType: att.mediaType, name: att.name });
+          if (att.mediaType === "application/pdf" && att.localUri) {
+            // PDFs: Gemini reads the raw text (1 cheap call) → Groq analyses
+            if (apiKey) {
+              const pdfText = await extractTextFromPdfViaGemini(apiKey, att.localUri, att.name).catch(() => "");
+              if (pdfText) textParts.push(`--- ${att.name} ---\n${pdfText}`);
+            }
+          } else if (att.base64) {
+            // Images: Groq vision OCR
+            const imgText = await extractMedicalTextFromImages([{ base64: att.base64, mediaType: att.mediaType, name: att.name }]).catch(() => "");
+            if (imgText) textParts.push(`--- ${att.name} ---\n${imgText}`);
           }
         }
 
-        const extractedText = allAsImages.length > 0
-          ? await extractMedicalTextFromImages(allAsImages)
-          : "";
-
+        const extractedText = textParts.join("\n\n");
         const analysisPrompt = extractedText
           ? [
               buildContextPrompt(profile, reports),
-              "--- EXTRACTED REPORT CONTENT (via OCR) ---",
+              "--- EXTRACTED REPORT CONTENT ---",
               extractedText,
               "--- END OF REPORT ---",
               "Use the extracted report content above to build the personalized health plan.",

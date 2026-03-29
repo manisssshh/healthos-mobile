@@ -17,6 +17,82 @@
 import * as FileSystem from "expo-file-system";
 import { RateLimitError, parseRetryDelay } from "./rateLimitError";
 
+// ─── Gemini PDF text extractor (called from groqService to avoid circular deps)
+
+const PDF_TEXT_EXTRACT_PROMPT = `Extract ALL visible text from this medical PDF exactly as it appears.
+Include every lab value, unit, reference range, date, patient detail, doctor note, and test name.
+Return plain structured text only. No analysis, no interpretation.`;
+
+export async function extractTextFromPdfViaGemini(
+  geminiApiKey: string,
+  localUri: string,
+  fileName: string
+): Promise<string> {
+  // Step 1: upload PDF to Gemini Files API
+  const fileInfo = await FileSystem.getInfoAsync(localUri, { size: true });
+  if (!fileInfo.exists) return "";
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const fileSize: number = (fileInfo as any).size ?? 0;
+
+  const startRes = await fetch(
+    `https://generativelanguage.googleapis.com/upload/v1beta/files?key=${geminiApiKey}`,
+    {
+      method: "POST",
+      headers: {
+        "X-Goog-Upload-Protocol": "resumable",
+        "X-Goog-Upload-Command": "start",
+        "X-Goog-Upload-Header-Content-Length": String(fileSize),
+        "X-Goog-Upload-Header-Content-Type": "application/pdf",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ file: { display_name: fileName } }),
+    }
+  );
+  if (!startRes.ok) return "";
+  const uploadUrl = startRes.headers.get("X-Goog-Upload-URL");
+  if (!uploadUrl) return "";
+
+  const uploadResult = await FileSystem.uploadAsync(uploadUrl, localUri, {
+    httpMethod: "POST",
+    uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
+    headers: {
+      "Content-Length": String(fileSize),
+      "X-Goog-Upload-Offset": "0",
+      "X-Goog-Upload-Command": "upload, finalize",
+    },
+  });
+  if (uploadResult.status < 200 || uploadResult.status >= 300) return "";
+
+  const uploadData = JSON.parse(uploadResult.body) as { file?: { uri?: string } };
+  const geminiFileUri = uploadData?.file?.uri;
+  if (!geminiFileUri) return "";
+
+  // Step 2: ask Gemini to extract raw text only (1 cheap call, no analysis)
+  const extractRes = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiApiKey}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{
+          role: "user",
+          parts: [
+            { fileData: { mimeType: "application/pdf", fileUri: geminiFileUri } },
+            { text: PDF_TEXT_EXTRACT_PROMPT },
+          ],
+        }],
+        generationConfig: { temperature: 0.0, maxOutputTokens: 8192 },
+      }),
+    }
+  );
+  if (!extractRes.ok) return "";
+
+  const extractData = await extractRes.json() as {
+    candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+  };
+  return extractData?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ?? "";
+}
+
 const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
 const GROQ_VISION_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct";
 

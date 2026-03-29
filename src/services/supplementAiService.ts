@@ -13,7 +13,7 @@ import * as FileSystem from "expo-file-system";
 import type { HealthReport, Supplement, SupplementInput, SupplementTiming } from "../types/health";
 import type { DoctorNoteInput } from "../types/health";
 import { RateLimitError, parseRetryDelay } from "./rateLimitError";
-import { extractMedicalTextFromImages, convertPdfToBase64Image, getGroqApiKey, callGroq } from "./groqService";
+import { extractMedicalTextFromImages, convertPdfToBase64Image, getGroqApiKey, callGroq, extractTextFromPdfViaGemini } from "./groqService";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -257,16 +257,19 @@ export async function extractSupplementsFromPrescriptions(
 
     if (groqKey) {
       // ── Groq full pipeline: read files + extract supplements ──────────────
-      const allAsImages: Array<{ base64: string; mediaType: string; name: string }> = [];
+      const textParts: string[] = [];
       for (const att of attachments) {
-        if (att.base64) {
-          allAsImages.push({ base64: att.base64, mediaType: att.mediaType, name: att.name });
+        if (att.mediaType === "application/pdf" && att.localUri) {
+          if (geminiKey) {
+            const pdfText = await extractTextFromPdfViaGemini(geminiKey, att.localUri, att.name).catch(() => "");
+            if (pdfText) textParts.push(`--- ${att.name} ---\n${pdfText}`);
+          }
+        } else if (att.base64) {
+          const imgText = await extractMedicalTextFromImages([{ base64: att.base64, mediaType: att.mediaType, name: att.name }]).catch(() => "");
+          if (imgText) textParts.push(`--- ${att.name} ---\n${imgText}`);
         }
       }
-
-      const extractedText = allAsImages.length > 0
-        ? await extractMedicalTextFromImages(allAsImages)
-        : "";
+      const extractedText = textParts.join("\n\n");
 
       const analysisPrompt = [
         `Extract all supplements and medications from this prescription. Date: ${new Date().toLocaleDateString("en-IN")}`,
