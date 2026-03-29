@@ -15,6 +15,7 @@
  */
 import * as FileSystem from "expo-file-system";
 import { extractMedicalTextFromImages, convertPdfToBase64Image, getGroqApiKey } from "./groqService";
+import { RateLimitError, parseRetryDelay } from "./rateLimitError";
 import type {
   AiPersonalization,
   DailyMealTemplate,
@@ -30,33 +31,7 @@ import type {
 import { SLEEP_GOAL_HOURS, STEP_GOAL, WATER_GOAL_ML } from "../types/health";
 import { generateActiveMetrics, getCalorieTarget } from "./metricService";
 
-// ─── Rate Limit Error ─────────────────────────────────────────────────────────
-
-export class RateLimitError extends Error {
-  retryAfterSeconds: number;
-  constructor(retryAfterSeconds: number) {
-    const mins = Math.ceil(retryAfterSeconds / 60);
-    const label = retryAfterSeconds < 60
-      ? `${retryAfterSeconds} seconds`
-      : `${mins} minute${mins > 1 ? "s" : ""}`;
-    super(`RATE_LIMIT:${retryAfterSeconds}`);
-    this.name = "RateLimitError";
-    this.retryAfterSeconds = retryAfterSeconds;
-    // Friendly message stored separately
-    this.message = `Gemini API rate limit reached. Please retry in ${label}.\n\nFree tier resets every minute (15 req/min) and daily at midnight PT.`;
-  }
-}
-
-export function parseRetryDelay(body: string): number {
-  try {
-    const json = JSON.parse(body) as {
-      error?: { details?: Array<{ retryDelay?: string }> };
-    };
-    const delay = json?.error?.details?.find((d) => d.retryDelay)?.retryDelay;
-    if (delay) return parseInt(delay.replace("s", ""), 10) || 60;
-  } catch { /* ignore */ }
-  return 60; // default 60s if not parseable
-}
+export { RateLimitError, parseRetryDelay } from "./rateLimitError";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 

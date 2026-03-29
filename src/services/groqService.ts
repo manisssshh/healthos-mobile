@@ -15,7 +15,7 @@
  */
 
 import * as FileSystem from "expo-file-system";
-import { RateLimitError, parseRetryDelay } from "./aiPersonalizationService";
+import { RateLimitError, parseRetryDelay } from "./rateLimitError";
 
 const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
 const GROQ_VISION_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct";

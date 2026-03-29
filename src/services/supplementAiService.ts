@@ -12,7 +12,7 @@
 import * as FileSystem from "expo-file-system";
 import type { HealthReport, Supplement, SupplementInput, SupplementTiming } from "../types/health";
 import type { DoctorNoteInput } from "../types/health";
-import { RateLimitError, parseRetryDelay } from "./aiPersonalizationService";
+import { RateLimitError, parseRetryDelay } from "./rateLimitError";
 import { extractMedicalTextFromImages, convertPdfToBase64Image, getGroqApiKey } from "./groqService";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
